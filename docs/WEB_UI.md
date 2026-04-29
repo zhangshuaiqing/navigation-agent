@@ -1,0 +1,109 @@
+# Web UI 使用文档
+
+## 概述
+
+Navigation Agent Web UI 是一个基于 Gradio 的交互式可视化界面，用于在浏览器中实时观察和控制 GridWorld 导航 Agent。
+
+## 启动方式
+
+```bash
+cd /media/zsq-508/data/project/navigation-agent
+uv run python scripts/web_ui.py
+```
+
+启动后会显示访问地址：
+
+```
+Running on local URL:  http://0.0.0.0:7860
+```
+
+在浏览器中打开该地址即可使用。
+
+## 界面说明
+
+### 左侧面板 - 控制区
+
+| 控件 | 说明 |
+|------|------|
+| **Grid Size** | 网格大小（4 ~ 20） |
+| **Obstacle Ratio** | 障碍物比例（0.0 ~ 0.5） |
+| **Random Seed** | 随机种子（0 表示随机） |
+| **Agent Type** | `heuristic`（BFS）或 `llm`（ReAct） |
+| **LLM Model** | LLM Agent 时使用的模型 |
+| **Auto-run Delay** | 自动运行时每步间隔（秒） |
+| **Reset** | 重置环境和 Agent |
+| **Step** | 执行单步 |
+| **Run** | 自动运行直到完成 |
+| **Stop** | 停止自动运行 |
+
+### 右侧面板 - 可视化区
+
+| 区域 | 说明 |
+|------|------|
+| **Grid World** | 网格可视化图像 |
+| **Status** | 当前状态（位置、步数、奖励等） |
+| **Logs** | 操作日志（保留最近 50 条） |
+
+### 图例
+
+| 符号 | 颜色 | 含义 |
+|------|------|------|
+| A | 绿色 | Agent 当前位置 |
+| G | 橙色 | 目标位置 |
+| 蓝色箭头 | - | Agent 走过的路径 |
+| 浅蓝色 | - | 已访问的格子 |
+| 深灰色 | - | 障碍物 |
+| 浅灰色 | - | 空格 |
+
+## 使用流程
+
+### 1. 基础导航（Heuristic Agent）
+
+1. 设置网格大小（推荐 6 ~ 10）
+2. 点击 **Reset** 生成环境
+3. 点击 **Run** 观察 Agent 自动导航到目标
+4. 或点击 **Step** 逐步执行
+
+### 2. LLM Agent 体验
+
+1. 选择 **Agent Type** 为 `llm`
+2. 选择 **LLM Model**（推荐 `gpt-4o-mini`，速度快且便宜）
+3. 确保已设置环境变量 `OPENAI_API_KEY`
+4. 点击 **Reset**，然后 **Run**
+
+> 注意：LLM Agent 每步都需要调用 OpenAI API，运行速度较慢。
+
+### 3. 自定义挑战
+
+- 增大 **Grid Size** 到 15+ 增加难度
+- 提高 **Obstacle Ratio** 到 0.3+ 增加障碍物密度
+- 使用不同 **Random Seed** 生成不同地图
+- 尝试不使用 BFS hint 的纯 LLM 推理（在代码中设置 `use_bfs_hint=False`）
+
+## 架构
+
+Web UI 的核心是 `AppState` 类，它维护：
+
+- `env`: GridWorld 环境实例
+- `agent`: 当前 Agent 实例（HeuristicNavigator 或 ReActNavigator）
+- `path_history`: Agent 走过的路径记录
+- `step_count` / `total_reward`: 统计信息
+- `is_running`: 自动运行状态标志
+
+Gradio 通过事件绑定将按钮点击映射到 `AppState` 的方法，实现状态更新和界面刷新。
+
+## 故障排除
+
+| 问题 | 解决方案 |
+|------|----------|
+| `OPENAI_API_KEY not set` | 设置环境变量后重启 Web UI |
+| 网格不显示 | 点击 **Reset** 初始化环境 |
+| Run 按钮无响应 | 检查是否已经到达目标或超过最大步数 |
+| 页面加载慢 | 减小 Grid Size 或增大 Auto-run Delay |
+
+## 扩展建议
+
+- 添加键盘快捷键（方向键控制 Agent）
+- 添加保存/加载地图功能
+- 添加多 Agent 同时运行对比
+- 添加 GIF 录制功能
