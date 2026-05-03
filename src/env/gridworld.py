@@ -37,9 +37,11 @@ class GridWorld:
         size: int = 8,
         obstacle_ratio: float = 0.2,
         seed: Optional[int] = None,
+        random_start_goal: bool = False,
     ):
         self.size = size
         self.obstacle_ratio = obstacle_ratio
+        self.random_start_goal = random_start_goal
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
         
@@ -55,6 +57,13 @@ class GridWorld:
     def _generate_map(self):
         """Generate a random map with obstacles."""
         self.grid.fill(CellType.EMPTY)
+        
+        # Pick start/goal positions if random mode
+        if self.random_start_goal:
+            self._pick_start_goal()
+        else:
+            self.agent_pos = (0, 0)
+            self.goal_pos = (self.size - 1, self.size - 1)
         
         # Place obstacles
         num_obstacles = int(self.size * self.size * self.obstacle_ratio)
@@ -73,6 +82,13 @@ class GridWorld:
         
         self.grid[self.agent_pos] = CellType.AGENT
         self.grid[self.goal_pos] = CellType.GOAL
+    
+    def _pick_start_goal(self):
+        """Randomly pick start and goal positions from empty cells."""
+        all_cells = [(r, c) for r in range(self.size) for c in range(self.size)]
+        self.rng.shuffle(all_cells)
+        self.agent_pos = all_cells[0]
+        self.goal_pos = all_cells[1]
     
     def _path_exists(
         self, start: Tuple[int, int], goal: Tuple[int, int]
@@ -120,19 +136,30 @@ class GridWorld:
         agent_pos: Optional[Tuple[int, int]] = None,
         goal_pos: Optional[Tuple[int, int]] = None,
         new_map: bool = False,
+        random_start_goal: Optional[bool] = None,
     ) -> dict:
         """Reset the environment."""
         self.step_count = 0
         self.done = False
         
+        # Update random_start_goal setting if provided
+        if random_start_goal is not None:
+            self.random_start_goal = random_start_goal
+        
         if agent_pos is not None:
             self.agent_pos = agent_pos
+        elif self.random_start_goal and new_map:
+            self._pick_start_goal()
+        elif self.random_start_goal:
+            # Keep current positions but ensure they're set
+            if self.agent_pos == self.goal_pos:
+                self._pick_start_goal()
         else:
             self.agent_pos = (0, 0)
         
         if goal_pos is not None:
             self.goal_pos = goal_pos
-        else:
+        elif not self.random_start_goal:
             self.goal_pos = (self.size - 1, self.size - 1)
         
         if new_map:

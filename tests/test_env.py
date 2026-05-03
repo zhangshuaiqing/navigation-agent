@@ -51,10 +51,25 @@ def test_reset():
     assert not env.done
 
 
+def test_random_start_goal():
+    env = GridWorld(size=6, random_start_goal=True, seed=42)
+    assert env.agent_pos != (0, 0) or env.goal_pos != (5, 5)
+    print(f"Random start: {env.agent_pos}, goal: {env.goal_pos}")
+    
+    # Run multiple times to verify randomness
+    positions = set()
+    for _ in range(10):
+        env.reset(new_map=True)
+        positions.add((env.agent_pos, env.goal_pos))
+    assert len(positions) > 1, "Should produce different positions"
+    print(f"Unique position pairs: {len(positions)}")
+
+
 if __name__ == "__main__":
     test_gridworld_init()
     test_step()
     test_goal_reached()
     test_shortest_path()
     test_reset()
+    test_random_start_goal()
     print("All tests passed!")

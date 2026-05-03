@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--llm-model", type=str, default="gpt-4o-mini", help="LLM model name")
     parser.add_argument("--benchmark", type=int, default=None, help="Run benchmark over N episodes")
     parser.add_argument("--max-steps", type=int, default=None, help="Max steps per episode")
+    parser.add_argument("--random-start-goal", action="store_true", help="Randomize start and goal positions")
     parser.add_argument("--no-render", action="store_true", help="Disable rendering")
     return parser.parse_args()
 
@@ -46,6 +47,7 @@ def main():
     print("=" * 60)
     print(f"Grid: {args.size}x{args.size}, Obstacles: {args.obstacles*100:.0f}%")
     print(f"Seed: {args.seed or 'random'}")
+    print(f"Random Start/Goal: {args.random_start_goal}")
     print(f"Agent: {'LLM ReAct (' + args.llm_model + ')' if args.use_llm else 'Heuristic/BFS'}")
     print("=" * 60)
     
@@ -53,6 +55,7 @@ def main():
         size=args.size,
         obstacle_ratio=args.obstacles,
         seed=args.seed,
+        random_start_goal=args.random_start_goal,
     )
     
     if args.use_llm:

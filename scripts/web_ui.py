@@ -56,13 +56,14 @@ class AppState:
             CellType.PATH: "#BBDEFB",
         }
 
-    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model):
+    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False):
         """Reset environment and agent."""
         seed_val = int(seed) if seed else None
         self.env = GridWorld(
             size=int(size),
             obstacle_ratio=float(obstacle_ratio),
             seed=seed_val,
+            random_start_goal=random_start_goal,
         )
         self.agent_type = agent_type
         self.path_history = [self.env.agent_pos]
@@ -277,6 +278,10 @@ def create_ui():
                     value="gpt-4o-mini",
                     label="LLM Model (for LLM agent)"
                 )
+                random_sg = gr.Checkbox(
+                    value=False,
+                    label="Random Start / Goal"
+                )
                 delay_slider = gr.Slider(
                     minimum=0.05, maximum=2.0, value=0.3, step=0.05,
                     label="Auto-run Delay (seconds)"
@@ -319,9 +324,9 @@ def create_ui():
                 )
 
         # ── Event handlers ────────────────────────────────────
-        def on_reset(size, obs_ratio, seed, a_type, llm):
+        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg):
             s = int(seed) if seed and seed > 0 else None
-            return state.reset(size, obs_ratio, s, a_type, llm)
+            return state.reset(size, obs_ratio, s, a_type, llm, random_sg)
 
         def on_step():
             return state.step()
@@ -335,7 +340,7 @@ def create_ui():
 
         reset_btn.click(
             fn=on_reset,
-            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model],
+            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg],
             outputs=[grid_plot, status_text, log_output]
         )
 
