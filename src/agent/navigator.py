@@ -46,7 +46,10 @@ class HeuristicNavigator(NavigationAgent):
     
     def act(self, observation: Optional[Dict] = None) -> str:
         """Take action using heuristic."""
-        if self.use_bfs_hint:
+        obs = observation or self.env._get_obs()
+        
+        # In full mode with BFS hint, use shortest path
+        if self.env.observation_mode == "full" and self.use_bfs_hint:
             path = self.env.get_shortest_path()
             if path and len(path) > 1:
                 next_step = path[1]
@@ -69,28 +72,59 @@ class HeuristicNavigator(NavigationAgent):
                 })
                 return action
         
-        # Simple goal-seeking with obstacle avoidance
-        obs = observation or self.env._get_obs()
+        # Local/fog mode or BFS disabled: use greedy goal-seeking + exploration
         ar, ac = obs["agent_pos"]
-        gr, gc = obs["goal_pos"]
+        gr, gc = obs.get("goal_pos") or self.env.goal_pos
+        goal_visible = obs.get("goal_visible", True)
+        goal_direction = obs.get("goal_direction")
         
         valid = self.env.get_valid_actions()
         
-        # Score each action by distance reduction
+        def _score_action(action):
+            """Score an action for local navigation."""
+            dr, dc = self.env.DIRECTIONS[action]
+            nr, nc = ar + dr, ac + dc
+            score = 0.0
+            
+            # Base: prefer moves toward goal direction even when not visible
+            if goal_direction and not goal_visible:
+                direction_bonus = 0.0
+                if "N" in goal_direction and dr < 0:
+                    direction_bonus += 3.0
+                if "S" in goal_direction and dr > 0:
+                    direction_bonus += 3.0
+                if "W" in goal_direction and dc < 0:
+                    direction_bonus += 3.0
+                if "E" in goal_direction and dc > 0:
+                    direction_bonus += 3.0
+                score -= direction_bonus
+            
+            if goal_visible:
+                # Visible goal: minimize Manhattan distance
+                score += abs(nr - gr) + abs(nc - gc)
+            else:
+                # Goal not visible: prefer exploring new areas
+                if not self.env.visited_mask[nr, nc]:
+                    score -= 5.0  # Reward unvisited cells
+                else:
+                    score += 1.0  # Slight penalty for visited cells
+            
+            # Strong penalty for revisiting very recent positions (avoid 2-step loops)
+            if (nr, nc) in self.last_positions[-3:]:
+                score += 20.0
+            elif (nr, nc) in self.last_positions:
+                score += 5.0
+            
+            return score
+        
+        # Score each action and pick the best
         best_action = None
         best_score = float('inf')
         
         for action in valid:
-            dr, dc = self.env.DIRECTIONS[action]
-            nr, nc = ar + dr, ac + dc
-            dist = abs(nr - gr) + abs(nc - gc)
-            
-            # Penalize revisiting recent positions
-            if (nr, nc) in self.last_positions:
-                dist += 5
-            
-            if dist < best_score:
-                best_score = dist
+            score = _score_action(action)
+            if score < best_score:
+                best_score = score
                 best_action = action
         
         if best_action is None and valid:
@@ -100,9 +134,14 @@ class HeuristicNavigator(NavigationAgent):
         if len(self.last_positions) > self.max_history:
             self.last_positions.pop(0)
         
+        reason = (
+            f"Goal-seeking: chosen to minimize distance ({best_score:.1f})"
+            if goal_visible
+            else f"Directional exploration: heading {goal_direction} (score {best_score:.1f})"
+        )
         self.history.append({
             "action": best_action or "up",
-            "reason": f"Goal-seeking: chosen to minimize distance ({best_score})"
+            "reason": reason
         })
         
         return best_action or "up"

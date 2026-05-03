@@ -65,6 +65,39 @@ def test_random_start_goal():
     print(f"Unique position pairs: {len(positions)}")
 
 
+def test_local_observation():
+    env = GridWorld(size=6, observation_mode="local", view_range=2, seed=42)
+    obs = env._get_obs()
+    
+    # Goal pos should be None in local mode if not within view
+    assert obs["goal_pos"] is None
+    assert obs["goal_visible"] == (abs(env.agent_pos[0] - env.goal_pos[0]) <= 2 and abs(env.agent_pos[1] - env.goal_pos[1]) <= 2)
+    assert obs["distance_to_goal"] is None or isinstance(obs["distance_to_goal"], int)
+    assert len(obs["surroundings"]) == 25  # 5x5 = (2*2+1)^2
+    print("Local observation test passed")
+
+
+def test_fog_of_war():
+    env = GridWorld(size=6, observation_mode="fog_of_war", view_range=1, seed=42)
+    
+    # Initial position should be visited
+    assert env.visited_mask[env.agent_pos] == True
+    
+    # Move agent
+    env.step("right")
+    
+    # New position should be visited
+    assert env.visited_mask[env.agent_pos] == True
+    
+    # Some cells should be unvisited (marked False)
+    assert not env.visited_mask.all()
+    
+    # Render with fog should show ? for unvisited
+    render_str = env.render(show_fog=True)
+    assert "?" in render_str
+    print("Fog of war test passed")
+
+
 if __name__ == "__main__":
     test_gridworld_init()
     test_step()
@@ -72,4 +105,6 @@ if __name__ == "__main__":
     test_shortest_path()
     test_reset()
     test_random_start_goal()
+    test_local_observation()
+    test_fog_of_war()
     print("All tests passed!")

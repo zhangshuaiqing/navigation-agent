@@ -38,10 +38,14 @@ class GridWorld:
         obstacle_ratio: float = 0.2,
         seed: Optional[int] = None,
         random_start_goal: bool = False,
+        observation_mode: str = "full",
+        view_range: int = 1,
     ):
         self.size = size
         self.obstacle_ratio = obstacle_ratio
         self.random_start_goal = random_start_goal
+        self.observation_mode = observation_mode
+        self.view_range = max(1, view_range)
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
         
@@ -51,6 +55,7 @@ class GridWorld:
         self.step_count: int = 0
         self.max_steps: int = size * size * 2
         self.done: bool = False
+        self.visited_mask: np.ndarray = np.zeros((size, size), dtype=bool)
         
         self._generate_map()
     
@@ -82,6 +87,10 @@ class GridWorld:
         
         self.grid[self.agent_pos] = CellType.AGENT
         self.grid[self.goal_pos] = CellType.GOAL
+        
+        # Initialize visited mask for fog_of_war mode
+        self.visited_mask.fill(False)
+        self._update_visited_mask()
     
     def _pick_start_goal(self):
         """Randomly pick start and goal positions from empty cells."""
@@ -89,6 +98,14 @@ class GridWorld:
         self.rng.shuffle(all_cells)
         self.agent_pos = all_cells[0]
         self.goal_pos = all_cells[1]
+    
+    def _update_visited_mask(self):
+        """Mark cells within view_range as visited."""
+        ar, ac = self.agent_pos
+        vr = self.view_range
+        for r in range(max(0, ar - vr), min(self.size, ar + vr + 1)):
+            for c in range(max(0, ac - vr), min(self.size, ac + vr + 1)):
+                self.visited_mask[r, c] = True
     
     def _path_exists(
         self, start: Tuple[int, int], goal: Tuple[int, int]
@@ -170,6 +187,10 @@ class GridWorld:
             self.grid[self.agent_pos] = CellType.AGENT
             self.grid[self.goal_pos] = CellType.GOAL
         
+        # Reset visited mask
+        self.visited_mask.fill(False)
+        self._update_visited_mask()
+        
         return self._get_obs()
     
     def step(self, action: str) -> Tuple[dict, float, bool, dict]:
@@ -220,48 +241,85 @@ class GridWorld:
             self.done = True
             info["reason"] = info.get("reason", "") + "_max_steps"
         
+        # Update visited mask after agent moves
+        self._update_visited_mask()
+        
         return self._get_obs(), reward, self.done, info
     
     def _get_obs(self) -> dict:
-        """Get current observation."""
+        """Get current observation based on observation_mode."""
         ar, ac = self.agent_pos
         gr, gc = self.goal_pos
+        vr = self.view_range
         
-        # Get surrounding cells (3x3 neighborhood)
+        # Build surroundings based on view_range
         surroundings = []
-        for dr in [-1, 0, 1]:
-            for dc in [-1, 0, 1]:
+        for dr in range(-vr, vr + 1):
+            for dc in range(-vr, vr + 1):
                 nr, nc = ar + dr, ac + dc
                 if 0 <= nr < self.size and 0 <= nc < self.size:
-                    cell = self.grid[nr, nc]
-                    if (nr, nc) == self.agent_pos:
+                    if self.observation_mode == "fog_of_war" and not self.visited_mask[nr, nc]:
+                        surroundings.append("?")
+                    elif (nr, nc) == self.agent_pos:
                         surroundings.append("A")
                     elif (nr, nc) == self.goal_pos:
                         surroundings.append("G")
-                    elif cell == CellType.OBSTACLE:
+                    elif self.grid[nr, nc] == CellType.OBSTACLE:
                         surroundings.append("#")
                     else:
                         surroundings.append(".")
                 else:
                     surroundings.append("X")
         
+        # Distance to goal (always available in full, hidden in local/fog)
+        if self.observation_mode == "full":
+            distance = abs(ar - gr) + abs(ac - gc)
+            goal_visible = True
+        else:
+            # In local/fog modes, only show distance if goal is within view
+            goal_visible = abs(ar - gr) <= vr and abs(ac - gc) <= vr
+            distance = abs(ar - gr) + abs(ac - gc) if goal_visible else None
+        
+        # Goal direction hint (available in all modes, but not exact position)
+        goal_direction = None
+        if gr is not None and gc is not None:
+            dr = gr - ar
+            dc = gc - ac
+            dirs = []
+            if dr < 0:
+                dirs.append("N")
+            elif dr > 0:
+                dirs.append("S")
+            if dc < 0:
+                dirs.append("W")
+            elif dc > 0:
+                dirs.append("E")
+            goal_direction = "".join(dirs) if dirs else "HERE"
+        
         return {
             "agent_pos": self.agent_pos,
-            "goal_pos": self.goal_pos,
+            "goal_pos": self.goal_pos if self.observation_mode == "full" else None,
+            "goal_visible": goal_visible,
+            "goal_direction": goal_direction,
             "grid_size": self.size,
             "surroundings": surroundings,
-            "distance_to_goal": abs(ar - gr) + abs(ac - gc),
+            "distance_to_goal": distance,
             "step_count": self.step_count,
             "max_steps": self.max_steps,
+            "observation_mode": self.observation_mode,
+            "view_range": self.view_range,
         }
     
-    def render(self, mark_path: Optional[List[Tuple[int, int]]] = None) -> str:
+    def render(self, mark_path: Optional[List[Tuple[int, int]]] = None, show_fog: bool = False) -> str:
         """Render the grid as a string."""
         lines = []
         for r in range(self.size):
             row_str = ""
             for c in range(self.size):
-                if (r, c) == self.agent_pos:
+                # Fog of war: hide unvisited cells
+                if show_fog and self.observation_mode == "fog_of_war" and not self.visited_mask[r, c]:
+                    row_str += " ? "
+                elif (r, c) == self.agent_pos:
                     row_str += " A "
                 elif (r, c) == self.goal_pos:
                     row_str += " G "

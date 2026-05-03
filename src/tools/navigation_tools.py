@@ -16,25 +16,30 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
     def sense_surroundings() -> str:
         """Sense the surroundings of the agent and return what's nearby.
         
-        Returns a description of the 3x3 area around the agent including
+        Returns a description of the area around the agent including
         obstacles, empty spaces, and the goal position.
+        The visible range depends on the environment's view_range setting.
         """
         obs = env._get_obs()
         ar, ac = obs["agent_pos"]
-        gr, gc = obs["goal_pos"]
+        gr, gc = obs["goal_pos"] or (None, None)
+        vr = obs["view_range"]
         
-        # Build 3x3 grid description
+        # Build grid description based on view_range
         rows = []
-        for dr in [-1, 0, 1]:
+        for dr in range(-vr, vr + 1):
             row = []
-            for dc in [-1, 0, 1]:
+            for dc in range(-vr, vr + 1):
                 nr, nc = ar + dr, ac + dc
                 if dr == 0 and dc == 0:
                     row.append("A")  # Agent
-                elif (nr, nc) == (gr, gc):
+                elif gr is not None and (nr, nc) == (gr, gc):
                     row.append("G")  # Goal
                 elif 0 <= nr < env.size and 0 <= nc < env.size:
-                    if env.grid[nr, nc] == 1:  # OBSTACLE
+                    cell = env.grid[nr, nc]
+                    if env.observation_mode == "fog_of_war" and not env.visited_mask[nr, nc]:
+                        row.append("?")
+                    elif cell == 1:  # OBSTACLE
                         row.append("#")
                     else:
                         row.append(".")
@@ -45,24 +50,42 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
         grid_view = "\n".join(rows)
         
         # Direction to goal
-        dr = gr - ar
-        dc = gc - ac
-        direction_hints = []
-        if dr < 0:
-            direction_hints.append("UP")
-        elif dr > 0:
-            direction_hints.append("DOWN")
-        if dc < 0:
-            direction_hints.append("LEFT")
-        elif dc > 0:
-            direction_hints.append("RIGHT")
+        if gr is not None and gc is not None:
+            dr = gr - ar
+            dc = gc - ac
+            direction_hints = []
+            if dr < 0:
+                direction_hints.append("UP")
+            elif dr > 0:
+                direction_hints.append("DOWN")
+            if dc < 0:
+                direction_hints.append("LEFT")
+            elif dc > 0:
+                direction_hints.append("RIGHT")
+            dir_str = f"Goal is to the: {', '.join(direction_hints) if direction_hints else 'HERE'}"
+        else:
+            dir_str = "Goal direction: UNKNOWN (not in view)"
+        
+        dist_str = (
+            f"Manhattan distance: {obs['distance_to_goal']}"
+            if obs['distance_to_goal'] is not None
+            else "Distance to goal: UNKNOWN (not in view)"
+        )
+        
+        mode_note = ""
+        if env.observation_mode == "local":
+            mode_note = "\n[LOCAL MODE: Only local surroundings visible, no global path hints]"
+        elif env.observation_mode == "fog_of_war":
+            mode_note = "\n[FOG OF WAR: Unvisited cells shown as '?']"
         
         return (
-            f"Agent at ({ar}, {ac}), Goal at ({gr}, {gc})\n"
-            f"Manhattan distance: {obs['distance_to_goal']}\n"
-            f"Goal is to the: {', '.join(direction_hints) if direction_hints else 'HERE'}\n"
-            f"Surroundings (3x3, A=agent, G=goal, #=obstacle, .=empty, X=out of bounds):\n"
-            f"{grid_view}"
+            f"Agent at ({ar}, {ac})"
+            + (f", Goal at ({gr}, {gc})" if gr is not None else "")
+            + f"\n{dist_str}\n"
+            + f"{dir_str}\n"
+            + f"Surroundings ({2*vr+1}x{2*vr+1}, A=agent, G=goal, #=obstacle, .=empty, ?=unseen, X=out of bounds):\n"
+            + f"{grid_view}"
+            + mode_note
         )
     
     @tool
@@ -77,10 +100,15 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
         """
         obs, reward, done, info = env.step(direction)
         ar, ac = obs["agent_pos"]
-        gr, gc = obs["goal_pos"]
+        gr, gc = obs["goal_pos"] or (None, None)
         
-        result = f"Moved {direction}. Now at ({ar}, {ac}). Goal at ({gr}, {gc}). "
-        result += f"Distance: {obs['distance_to_goal']}. Reward: {reward:.2f}."
+        result = f"Moved {direction}. Now at ({ar}, {ac})."
+        if gr is not None:
+            result += f" Goal at ({gr}, {gc})."
+        
+        if obs["distance_to_goal"] is not None:
+            result += f" Distance: {obs['distance_to_goal']}."
+        result += f" Reward: {reward:.2f}."
         
         if done:
             if info.get("reason") == "reached_goal":
@@ -100,7 +128,16 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
         """Get the current position of the agent and the goal."""
         obs = env._get_obs()
         ar, ac = obs["agent_pos"]
-        gr, gc = obs["goal_pos"]
+        gr, gc = obs["goal_pos"] or (None, None)
+        
+        if gr is None:
+            # Local/fog mode: goal not visible, give relative direction only
+            return (
+                f"Agent: ({ar}, {ac}). "
+                f"Goal is not currently visible in your view range ({obs['view_range']}). "
+                f"Explore to find it!"
+            )
+        
         return (
             f"Agent: ({ar}, {ac}), Goal: ({gr}, {gc}), "
             f"Distance: {obs['distance_to_goal']}"
@@ -111,7 +148,14 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
         """Get a hint about the shortest path to the goal.
         
         This uses BFS to find the optimal next step.
+        In local/fog observation modes, this tool is disabled.
         """
+        if env.observation_mode != "full":
+            return (
+                f"Path hints are unavailable in '{env.observation_mode}' mode. "
+                f"You must navigate using only local surroundings."
+            )
+        
         path = env.get_shortest_path()
         if path is None:
             return "No path found to goal!"

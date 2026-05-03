@@ -56,7 +56,7 @@ class AppState:
             CellType.PATH: "#BBDEFB",
         }
 
-    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False):
+    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False, observation_mode="full", view_range=1):
         """Reset environment and agent."""
         seed_val = int(seed) if seed else None
         self.env = GridWorld(
@@ -64,6 +64,8 @@ class AppState:
             obstacle_ratio=float(obstacle_ratio),
             seed=seed_val,
             random_start_goal=random_start_goal,
+            observation_mode=observation_mode,
+            view_range=int(view_range),
         )
         self.agent_type = agent_type
         self.path_history = [self.env.agent_pos]
@@ -168,7 +170,16 @@ class AppState:
         # Draw cells
         for r in range(size):
             for c in range(size):
-                if (r, c) == self.env.agent_pos:
+                # Fog of war: unvisited cells are hidden
+                is_fog = (
+                    self.env.observation_mode == "fog_of_war"
+                    and not self.env.visited_mask[r, c]
+                )
+                
+                if is_fog:
+                    color = "#CCCCCC"  # Gray fog
+                    label = ""
+                elif (r, c) == self.env.agent_pos:
                     color = self.cell_colors[CellType.AGENT]
                     label = "A"
                 elif (r, c) == self.env.goal_pos:
@@ -282,6 +293,15 @@ def create_ui():
                     value=False,
                     label="Random Start / Goal"
                 )
+                obs_mode = gr.Dropdown(
+                    choices=["full", "local", "fog_of_war"],
+                    value="full",
+                    label="Observation Mode"
+                )
+                view_range = gr.Slider(
+                    minimum=1, maximum=5, value=1, step=1,
+                    label="View Range"
+                )
                 delay_slider = gr.Slider(
                     minimum=0.05, maximum=2.0, value=0.3, step=0.05,
                     label="Auto-run Delay (seconds)"
@@ -324,9 +344,9 @@ def create_ui():
                 )
 
         # ── Event handlers ────────────────────────────────────
-        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg):
+        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg, obs_mode, view_range):
             s = int(seed) if seed and seed > 0 else None
-            return state.reset(size, obs_ratio, s, a_type, llm, random_sg)
+            return state.reset(size, obs_ratio, s, a_type, llm, random_sg, obs_mode, view_range)
 
         def on_step():
             return state.step()
@@ -340,7 +360,7 @@ def create_ui():
 
         reset_btn.click(
             fn=on_reset,
-            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg],
+            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg, obs_mode, view_range],
             outputs=[grid_plot, status_text, log_output]
         )
 
