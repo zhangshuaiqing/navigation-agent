@@ -3,6 +3,7 @@ GridWorld environment for navigation tasks.
 """
 
 import random
+from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Optional, Tuple, List
 import numpy as np
@@ -14,6 +15,17 @@ class CellType(IntEnum):
     AGENT = 2
     GOAL = 3
     PATH = 4
+    DYNAMIC_OBSTACLE = 5
+
+
+@dataclass
+class DynamicObstacle:
+    """A moving obstacle in the grid world."""
+    pos: Tuple[int, int]
+    direction: str = "right"  # up, down, left, right
+    speed: int = 1  # Move every N agent steps
+    move_prob: float = 0.5  # Probability of moving when speed triggers
+    boundary_mode: str = "bounce"  # bounce, wrap, random
 
 
 class GridWorld:
@@ -40,12 +52,16 @@ class GridWorld:
         random_start_goal: bool = False,
         observation_mode: str = "full",
         view_range: int = 1,
+        num_dynamic_obstacles: int = 0,
+        dynamic_obstacle_speed: int = 1,
     ):
         self.size = size
         self.obstacle_ratio = obstacle_ratio
         self.random_start_goal = random_start_goal
         self.observation_mode = observation_mode
         self.view_range = max(1, view_range)
+        self.num_dynamic_obstacles = num_dynamic_obstacles
+        self.dynamic_obstacle_speed = dynamic_obstacle_speed
         self.rng = random.Random(seed)
         self.np_rng = np.random.default_rng(seed)
         
@@ -56,6 +72,7 @@ class GridWorld:
         self.max_steps: int = size * size * 2
         self.done: bool = False
         self.visited_mask: np.ndarray = np.zeros((size, size), dtype=bool)
+        self.dynamic_obstacles: List[DynamicObstacle] = []
         
         self._generate_map()
     
@@ -91,6 +108,39 @@ class GridWorld:
         # Initialize visited mask for fog_of_war mode
         self.visited_mask.fill(False)
         self._update_visited_mask()
+        
+        # Initialize dynamic obstacles
+        self._init_dynamic_obstacles()
+    
+    def _init_dynamic_obstacles(self):
+        """Initialize dynamic obstacles on empty cells."""
+        self.dynamic_obstacles.clear()
+        if self.num_dynamic_obstacles <= 0:
+            return
+        
+        directions = ["up", "down", "left", "right"]
+        boundary_modes = ["bounce", "bounce", "bounce", "random"]  # Mostly bounce
+        
+        # Collect empty cells (not agent, not goal, not static obstacle)
+        empty_cells = []
+        for r in range(self.size):
+            for c in range(self.size):
+                if self.grid[r, c] == CellType.EMPTY:
+                    empty_cells.append((r, c))
+        
+        self.rng.shuffle(empty_cells)
+        
+        for i in range(min(self.num_dynamic_obstacles, len(empty_cells))):
+            pos = empty_cells[i]
+            dyn_obs = DynamicObstacle(
+                pos=pos,
+                direction=self.rng.choice(directions),
+                speed=self.dynamic_obstacle_speed,
+                move_prob=self.rng.uniform(0.3, 0.7),
+                boundary_mode=self.rng.choice(boundary_modes),
+            )
+            self.dynamic_obstacles.append(dyn_obs)
+            self.grid[pos] = CellType.DYNAMIC_OBSTACLE
     
     def _pick_start_goal(self):
         """Randomly pick start and goal positions from empty cells."""
@@ -106,6 +156,76 @@ class GridWorld:
         for r in range(max(0, ar - vr), min(self.size, ar + vr + 1)):
             for c in range(max(0, ac - vr), min(self.size, ac + vr + 1)):
                 self.visited_mask[r, c] = True
+    
+    def _update_dynamic_obstacles(self):
+        """Move dynamic obstacles after agent step."""
+        if not self.dynamic_obstacles:
+            return
+        
+        # Only move every N agent steps based on speed
+        if self.step_count % self.dynamic_obstacle_speed != 0:
+            return
+        
+        all_dirs = ["up", "down", "left", "right"]
+        opposite = {"up": "down", "down": "up", "left": "right", "right": "left"}
+        dir_deltas = {"up": (-1, 0), "down": (1, 0), "left": (0, -1), "right": (0, 1)}
+        
+        for dyn in self.dynamic_obstacles:
+            if self.rng.random() > dyn.move_prob:
+                continue
+            
+            r, c = dyn.pos
+            dr, dc = dir_deltas[dyn.direction]
+            nr, nc = r + dr, c + dc
+            
+            # Check boundaries
+            out_of_bounds = not (0 <= nr < self.size and 0 <= nc < self.size)
+            
+            if out_of_bounds:
+                if dyn.boundary_mode == "bounce":
+                    dyn.direction = opposite[dyn.direction]
+                elif dyn.boundary_mode == "wrap":
+                    nr = (nr + self.size) % self.size
+                    nc = (nc + self.size) % self.size
+                elif dyn.boundary_mode == "random":
+                    dyn.direction = self.rng.choice(all_dirs)
+                    dr, dc = dir_deltas[dyn.direction]
+                    nr, nc = r + dr, c + dc
+                    if not (0 <= nr < self.size and 0 <= nc < self.size):
+                        continue
+                else:
+                    continue
+            
+            # Check if target cell is valid (not static obstacle, not agent, not goal, not another dynamic)
+            target_cell = self.grid[nr, nc]
+            if target_cell in (CellType.OBSTACLE, CellType.AGENT, CellType.GOAL, CellType.DYNAMIC_OBSTACLE):
+                # Blocked: try to bounce or pick random direction
+                if dyn.boundary_mode == "bounce":
+                    dyn.direction = opposite[dyn.direction]
+                else:
+                    # Pick a random valid direction
+                    valid_dirs = []
+                    for d in all_dirs:
+                        ddr, ddc = dir_deltas[d]
+                        nnr, nnc = r + ddr, c + ddc
+                        if 0 <= nnr < self.size and 0 <= nnc < self.size:
+                            if self.grid[nnr, nnc] not in (CellType.OBSTACLE, CellType.AGENT, CellType.GOAL, CellType.DYNAMIC_OBSTACLE):
+                                valid_dirs.append(d)
+                    if valid_dirs:
+                        dyn.direction = self.rng.choice(valid_dirs)
+                        dr, dc = dir_deltas[dyn.direction]
+                        nr, nc = r + dr, c + dc
+                    else:
+                        continue
+                # Recheck after direction change
+                target_cell = self.grid[nr, nc]
+                if target_cell in (CellType.OBSTACLE, CellType.AGENT, CellType.GOAL, CellType.DYNAMIC_OBSTACLE):
+                    continue
+            
+            # Move dynamic obstacle
+            self.grid[r, c] = CellType.EMPTY
+            dyn.pos = (nr, nc)
+            self.grid[nr, nc] = CellType.DYNAMIC_OBSTACLE
     
     def _path_exists(
         self, start: Tuple[int, int], goal: Tuple[int, int]
@@ -182,10 +302,12 @@ class GridWorld:
         if new_map:
             self._generate_map()
         else:
-            # Just reset positions
+            # Just reset positions and dynamic obstacles
             self.grid[self.grid == CellType.AGENT] = CellType.EMPTY
+            self.grid[self.grid == CellType.DYNAMIC_OBSTACLE] = CellType.EMPTY
             self.grid[self.agent_pos] = CellType.AGENT
             self.grid[self.goal_pos] = CellType.GOAL
+            self._init_dynamic_obstacles()
         
         # Reset visited mask
         self.visited_mask.fill(False)
@@ -213,10 +335,15 @@ class GridWorld:
         if not (0 <= new_r < self.size and 0 <= new_c < self.size):
             reward = -0.5
             info = {"reason": "out_of_bounds", "attempted": (new_r, new_c)}
-        # Check obstacle
+        # Check static obstacle
         elif self.grid[new_r, new_c] == CellType.OBSTACLE:
             reward = -0.5
             info = {"reason": "hit_obstacle"}
+        # Check dynamic obstacle collision
+        elif self.grid[new_r, new_c] == CellType.DYNAMIC_OBSTACLE:
+            reward = -1.0
+            info = {"reason": "hit_dynamic_obstacle", "agent_bounced": True}
+            # Agent does not move, stays in place
         else:
             # Move agent
             old_r, old_c = self.agent_pos
@@ -235,6 +362,9 @@ class GridWorld:
                 new_dist = abs(new_r - self.goal_pos[0]) + abs(new_c - self.goal_pos[1])
                 reward = 0.1 if new_dist < old_dist else -0.1
                 info = {"reason": "moved", "distance_to_goal": new_dist}
+        
+        # Update dynamic obstacles after agent moves
+        self._update_dynamic_obstacles()
         
         self.step_count += 1
         if self.step_count >= self.max_steps:
@@ -327,6 +457,8 @@ class GridWorld:
                     row_str += " * "
                 elif self.grid[r, c] == CellType.OBSTACLE:
                     row_str += "###"
+                elif self.grid[r, c] == CellType.DYNAMIC_OBSTACLE:
+                    row_str += " D "
                 else:
                     row_str += " . "
             lines.append(row_str)
@@ -341,7 +473,7 @@ class GridWorld:
             if (
                 0 <= nr < self.size
                 and 0 <= nc < self.size
-                and self.grid[nr, nc] != CellType.OBSTACLE
+                and self.grid[nr, nc] not in (CellType.OBSTACLE, CellType.DYNAMIC_OBSTACLE)
             ):
                 valid.append(action)
         return valid

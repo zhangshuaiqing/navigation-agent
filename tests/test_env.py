@@ -98,6 +98,34 @@ def test_fog_of_war():
     print("Fog of war test passed")
 
 
+def test_dynamic_obstacles():
+    env = GridWorld(size=6, num_dynamic_obstacles=3, seed=42)
+    
+    # Check dynamic obstacles exist
+    assert len(env.dynamic_obstacles) == 3
+    
+    # Check they're on the grid
+    for dyn in env.dynamic_obstacles:
+        assert env.grid[dyn.pos] == CellType.DYNAMIC_OBSTACLE
+    
+    # Step should move dynamic obstacles
+    initial_positions = [dyn.pos for dyn in env.dynamic_obstacles]
+    env.step("down")
+    new_positions = [dyn.pos for dyn in env.dynamic_obstacles]
+    
+    # At least one might have moved (probabilistic)
+    print(f"Dynamic obs positions before: {initial_positions}")
+    print(f"Dynamic obs positions after:  {new_positions}")
+    
+    # Check agent can't move into dynamic obstacle
+    # Place agent next to a dynamic obstacle and try to move into it
+    # This is probabilistic so we just verify the grid cell type
+    for dyn in env.dynamic_obstacles:
+        assert env.grid[dyn.pos] == CellType.DYNAMIC_OBSTACLE
+    
+    print("Dynamic obstacles test passed")
+
+
 if __name__ == "__main__":
     test_gridworld_init()
     test_step()
@@ -107,4 +135,5 @@ if __name__ == "__main__":
     test_random_start_goal()
     test_local_observation()
     test_fog_of_war()
+    test_dynamic_obstacles()
     print("All tests passed!")

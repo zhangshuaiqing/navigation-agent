@@ -56,7 +56,7 @@ class AppState:
             CellType.PATH: "#BBDEFB",
         }
 
-    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False, observation_mode="full", view_range=1):
+    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False, observation_mode="full", view_range=1, num_dynamic=0):
         """Reset environment and agent."""
         seed_val = int(seed) if seed else None
         self.env = GridWorld(
@@ -66,6 +66,7 @@ class AppState:
             random_start_goal=random_start_goal,
             observation_mode=observation_mode,
             view_range=int(view_range),
+            num_dynamic_obstacles=int(num_dynamic),
         )
         self.agent_type = agent_type
         self.path_history = [self.env.agent_pos]
@@ -185,6 +186,9 @@ class AppState:
                 elif (r, c) == self.env.goal_pos:
                     color = self.cell_colors[CellType.GOAL]
                     label = "G"
+                elif self.env.grid[r, c] == CellType.DYNAMIC_OBSTACLE:
+                    color = "#FF9800"  # Orange for dynamic obstacles
+                    label = "D"
                 elif (r, c) in self.path_history[:-1]:
                     color = self.cell_colors[CellType.PATH]
                     label = ""
@@ -302,6 +306,10 @@ def create_ui():
                     minimum=1, maximum=5, value=1, step=1,
                     label="View Range"
                 )
+                num_dynamic = gr.Slider(
+                    minimum=0, maximum=10, value=0, step=1,
+                    label="Dynamic Obstacles"
+                )
                 delay_slider = gr.Slider(
                     minimum=0.05, maximum=2.0, value=0.3, step=0.05,
                     label="Auto-run Delay (seconds)"
@@ -320,8 +328,9 @@ def create_ui():
                 **Legend:**
                 - A (green) = Agent
                 - G (orange) = Goal
+                - D (amber) = Dynamic Obstacle
                 - Blue arrows = Path taken
-                - Dark gray = Obstacle
+                - Dark gray = Static Obstacle
                 - Light blue = Visited cells
                 """)
 
@@ -344,9 +353,9 @@ def create_ui():
                 )
 
         # ── Event handlers ────────────────────────────────────
-        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg, obs_mode, view_range):
+        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg, obs_mode, view_range, num_dynamic):
             s = int(seed) if seed and seed > 0 else None
-            return state.reset(size, obs_ratio, s, a_type, llm, random_sg, obs_mode, view_range)
+            return state.reset(size, obs_ratio, s, a_type, llm, random_sg, obs_mode, view_range, num_dynamic)
 
         def on_step():
             return state.step()
@@ -360,7 +369,7 @@ def create_ui():
 
         reset_btn.click(
             fn=on_reset,
-            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg, obs_mode, view_range],
+            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg, obs_mode, view_range, num_dynamic],
             outputs=[grid_plot, status_text, log_output]
         )
 
