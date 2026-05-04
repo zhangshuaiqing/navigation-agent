@@ -33,24 +33,37 @@
 
 ## 📝 待办事项（TODO）
 
-### Phase 1 - 增强环境功能
+### Phase 1 - 增强环境功能 (2026-04-29)
 **目标**: 使 GridWorld 更加丰富和实用
 
 详细设计方案见: [docs/PLAN_PHASE1.md](PLAN_PHASE1.md)
 
-总体分为 4 个功能模块，按依赖关系分批执行：
-
 | 功能 | 状态 | 优先级 | 依赖 |
 |------|------|--------|------|
-| 随机起点/终点配置 | 待实现 | P0 | 无 |
-| 部分可观测状态（局部视野） | 待实现 | P0 | 无 |
-| 动态障碍物（移动平台） | 待实现 | P1 | 功能 2 |
-| 多目标点任务系统 | 待实现 | P1 | 功能 1 |
+| 随机起点/终点配置 | ✅ 已完成 | P0 | 无 |
+| 部分可观测状态（局部视野） | ✅ 已完成 | P0 | 无 |
+| 动态障碍物（移动平台） | ✅ 已完成 | P1 | 功能 2 |
+| 多目标点任务系统 | ✅ 已完成 | P1 | 功能 1 |
 
-- [ ] 功能 1：随机起点/终点配置
-- [ ] 功能 2：部分可观测状态（仅能看到局部环境）
-- [ ] 功能 3：动态障碍物/移动平台
-- [ ] 功能 4：多目标点和任务系统
+- [x] 功能 1：随机起点/终点配置
+  - `GridWorld(random_start_goal=True)` 随机选取起点和终点
+  - BFS 验证可达性，自动重采样或清除障碍物
+  - CLI: `--random-start-goal`, Web UI: checkbox
+- [x] 功能 2：部分可观测状态（局部视野）
+  - 三种模式: `full`（全知）/ `local`（局部可见）/ `fog_of_war`（灰色迷雾）
+  - `get_path_hint` 在非 full 模式下被禁用
+  - Heuristic Agent 自动切换为贪心+方向探索策略
+  - CLI: `--obs-mode {full,local,fog_of_war} --view-range N`
+- [x] 功能 3：动态障碍物（移动平台）
+  - 方向控制: bounce（反弹）/ wrap（环绕）/ random（随机转向）
+  - 速度控制: 每 N 个 agent 步移动一次
+  - 碰撞检测: agent 撞上动态障碍物被弹回，reward -1.0
+  - CLI: `--dynamic N`
+- [x] 功能 4：多目标点任务系统
+  - 三种模式: `sequential`（顺序访问）/ `any_order`（任意顺序）/ `collect`（收集消失）
+  - 子目标奖励 + 全部完成大奖
+  - BFS 自动适配到当前激活目标
+  - CLI: `--goals N --task-type {sequential,any_order,collect}`
 
 ### Phase 2 - 增强 Agent 智能
 **目标**: 提升 Agent 的导航策略和学习能力
@@ -96,13 +109,14 @@
 |------|------|----------|--------|
 | 2026-04-29 | v0.1 | 项目初始化，完成 GridWorld 环境、LangChain Tools、Heuristic/ReAct Agent、Demo | Hermes |
 | 2026-04-29 | v0.2 | 添加 Gradio Web UI，支持实时可视化、单步/自动运行、状态面板 | Hermes |
+| 2026-04-29 | v0.3 | Phase 1 完成：随机起点/终点、局部视野(full/local/fog_of_war)、动态障碍物、多目标任务系统 | Hermes |
 
 ---
 
 ## 🎯 当前状态
 
-**阶段**: Phase 3 部分完成
-**下一步**: Phase 4 - 评估与分析 / Phase 1 增强环境功能
+**阶段**: Phase 1 完成 ✅
+**下一步**: Phase 2 - 增强 Agent 智能
 **阻塞项**: 无
 
 ---
