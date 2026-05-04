@@ -23,6 +23,9 @@ cd /media/zsq-508/data/project/navigation-agent
 
 # 安装依赖（已包含在项目 pyproject.toml 中）
 uv sync
+
+# （可选）配置 OpenAI API Key，用于 LLM ReAct Agent
+echo 'OPENAI_API_KEY="sk-your-api-key"' >> .env
 ```
 
 ### 运行 CLI Demo
@@ -38,7 +41,7 @@ uv run python scripts/demo.py --size 8 --seed 42 --delay 0.3
 uv run python scripts/demo.py --benchmark 20 --no-render
 
 # LLM ReAct Agent（需要 OPENAI_API_KEY）
-export OPENAI_API_KEY="your-key"
+export OPENAI_API_KEY="sk-your-api-key"  # 或已写入 .env 则可跳过
 uv run python scripts/demo.py --use-llm --llm-model gpt-4o-mini
 ```
 

@@ -110,9 +110,84 @@ def test_heuristic_with_memory():
     print("Heuristic with memory test passed")
 
 
+def test_react_prompt_basic():
+    """Test that ReAct prompt includes basic info."""
+    env = GridWorld(size=6, seed=42)
+    # We can't instantiate ReActNavigator without API key, so test the prompt logic directly
+    from src.agent.navigator import ReActNavigator
+    import os
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Skipping ReAct prompt test (no API key)")
+        return
+    
+    from langchain_openai import ChatOpenAI
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    agent = ReActNavigator(env, llm=llm)
+    
+    prompt = agent._build_prompt()
+    
+    # Should contain basic info
+    assert "navigation agent" in prompt
+    assert "6x6" in prompt
+    assert "sense_surroundings" in prompt
+    assert "move" in prompt
+    assert "get_path_hint" in prompt
+    print("ReAct basic prompt test passed")
+
+
+def test_react_prompt_local_mode():
+    """Test that ReAct prompt adapts to local mode."""
+    from src.agent.navigator import ReActNavigator
+    
+    # Test prompt generation without creating LLM
+    class MockReAct(ReActNavigator):
+        def __init__(self, env):
+            self.env = env
+            self.max_iterations = 50
+            self.messages = []
+            self.history = []
+            self.tools = []
+    
+    env = GridWorld(size=6, observation_mode="local", view_range=2, seed=42)
+    agent = MockReAct(env)
+    
+    prompt = agent._build_prompt()
+    
+    assert "LOCAL MODE" in prompt
+    assert "DISABLED" in prompt or "get_path_hint" in prompt
+    assert "sense_surroundings" in prompt
+    print("ReAct local mode prompt test passed")
+
+
+def test_react_prompt_multi_goal():
+    """Test that ReAct prompt adapts to multi-goal tasks."""
+    from src.agent.navigator import ReActNavigator
+    
+    class MockReAct(ReActNavigator):
+        def __init__(self, env):
+            self.env = env
+            self.max_iterations = 50
+            self.messages = []
+            self.history = []
+            self.tools = []
+    
+    env = GridWorld(size=6, num_goals=3, task_type="sequential", seed=42)
+    agent = MockReAct(env)
+    
+    prompt = agent._build_prompt()
+    
+    assert "Task" in prompt
+    assert "MULTI-GOAL" in prompt
+    assert "0/3" in prompt
+    print("ReAct multi-goal prompt test passed")
+
+
 if __name__ == "__main__":
     test_memory_basic()
     test_memory_dead_end()
     test_memory_backtrack()
     test_heuristic_with_memory()
+    test_react_prompt_basic()
+    test_react_prompt_local_mode()
+    test_react_prompt_multi_goal()
     print("All agent tests passed!")

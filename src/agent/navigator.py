@@ -277,30 +277,102 @@ class ReActNavigator(NavigationAgent):
         return fallback
     
     def _build_prompt(self) -> str:
-        """Build the navigation prompt for the LLM."""
-        obs = self.env._get_obs()
+        """Build the navigation prompt for the LLM, adapting to environment settings."""
+        env = self.env
+        obs = env._get_obs()
         ar, ac = obs["agent_pos"]
-        gr, gc = obs["goal_pos"]
+        goal_pos = obs.get("goal_pos")
+        gr, gc = goal_pos if goal_pos is not None else (None, None)
+        valid = env.get_valid_actions()
+        mode = env.observation_mode
+        size = env.size
         
-        valid = self.env.get_valid_actions()
+        lines = []
+        lines.append(f"You are a navigation agent in a {size}x{size} grid world.")
+        lines.append(f"Your current position: ({ar}, {ac})")
         
-        prompt = f"""You are a navigation agent in a {self.env.size}x{self.env.size} grid world.
-Your current position: ({ar}, {ac})
-Goal position: ({gr}, {gc})
-Distance to goal: {obs['distance_to_goal']}
-Valid moves from here: {valid}
-
-You must navigate to the goal (G) while avoiding obstacles (#).
-Use the available tools to sense surroundings and move.
-
-Strategy:
-1. First, use sense_surroundings to understand the environment
-2. Then use move() with one of: up, down, left, right
-3. You can use get_path_hint() if you're stuck
-
-Think step by step. Make ONE move at a time.
-"""
-        return prompt
+        # ── Goal / Task info ─────────────────────────────
+        task = obs.get("task")
+        if task:
+            total_goals = task["total_goals"]
+            completed = task["completed"]
+            task_type = task["type"]
+            current_idx = task["current_goal_index"]
+            type_desc = {
+                "sequential": "Visit goals IN ORDER",
+                "any_order": "Visit all goals in ANY order",
+                "collect": "Collect all goals (they disappear after collection)",
+            }
+            lines.append(f"Task: {type_desc.get(task_type, task_type)} | Goals: {completed}/{total_goals} completed")
+            lines.append(f"Current goal #{current_idx + 1}/{total_goals}: {obs.get('goal_pos', 'UNKNOWN')}")
+        elif gr is not None:
+            lines.append(f"Goal position: ({gr}, {gc})")
+            lines.append(f"Distance to goal: {obs['distance_to_goal']}")
+        else:
+            lines.append(f"Goal position: NOT IN VIEW (explore to find it)")
+        
+        # ── Observation mode warning ─────────────────────
+        if mode == "local":
+            vr = obs["view_range"]
+            direction = obs.get("goal_direction")
+            lines.append("")
+            lines.append(f"[LOCAL MODE] You can only see {2*vr+1}x{2*vr+1} cells around you.")
+            lines.append(f"[LOCAL MODE] Goal direction hint: {direction or 'UNKNOWN'}")
+            lines.append("[LOCAL MODE] Use sense_surroundings frequently. get_path_hint is DISABLED.")
+        elif mode == "fog_of_war":
+            vr = obs["view_range"]
+            direction = obs.get("goal_direction")
+            lines.append("")
+            lines.append(f"[FOG OF WAR] Only visited cells are visible. Unvisited cells show as '?'.")
+            lines.append(f"[FOG OF WAR] Goal direction hint: {direction or 'UNKNOWN'}")
+            lines.append("[FOG OF WAR] Explore methodically. get_path_hint is DISABLED.")
+        
+        # ── Dynamic obstacles warning ────────────────────
+        if env.num_dynamic_obstacles > 0 and env.dynamic_obstacles:
+            lines.append("")
+            lines.append(f"[WARNING] {len(env.dynamic_obstacles)} obstacles are MOVING. Paths may change.")
+        
+        # ── Multi-target awareness ───────────────────────
+        if task and total_goals > 1:
+            lines.append("")
+            lines.append("[MULTI-GOAL] Use get_position to check which goals are done/pending/active.")
+        
+        # ── Valid moves ──────────────────────────────────
+        lines.append("")
+        lines.append(f"Valid moves from ({ar}, {ac}): {valid}")
+        
+        # ── Tools ────────────────────────────────────────
+        lines.append("")
+        lines.append("Available tools:")
+        lines.append("- sense_surroundings: See what's around you (always available)")
+        lines.append("- move(direction): Move in one of the valid directions")
+        lines.append("- get_position: Check current position and goal progress")
+        if mode == "full":
+            lines.append("- get_path_hint: BFS shortest path to current goal")
+        else:
+            lines.append("- get_path_hint: [DISABLED in " + mode + " mode]")
+        
+        # ── Strategy hints (scenario-specific) ───────────
+        lines.append("")
+        lines.append("Strategy:")
+        if mode == "full" and (not task or total_goals == 1):
+            lines.append("1. Use get_path_hint to get the optimal path")
+            lines.append("2. move() in the suggested direction")
+            lines.append("3. Repeat until goal reached")
+        elif mode == "full" and total_goals > 1 and task_type == "sequential":
+            lines.append("1. Use get_path_hint to get path to current goal")
+            lines.append("2. move() toward it. After reaching a goal, get_path_hint points to the next one.")
+            lines.append(f"3. Complete all {total_goals} goals in order.")
+        elif mode in ("local", "fog_of_war"):
+            lines.append("1. Start with sense_surroundings to see nearby cells")
+            lines.append("2. Move toward the goal direction hint")
+            lines.append("3. If blocked, explore alternate paths")
+            lines.append("4. Use sense_surroundings after each move to update your view")
+        
+        lines.append("")
+        lines.append("Think step by step. Make ONE move at a time.")
+        
+        return "\n".join(lines)
     
     def reset(self):
         super().reset()
