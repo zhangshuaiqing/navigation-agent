@@ -307,6 +307,12 @@ class GridWorld:
             if out_of_bounds:
                 if dyn.boundary_mode == "bounce":
                     dyn.direction = opposite[dyn.direction]
+                    # Recalculate position after bounce
+                    dr, dc = dir_deltas[dyn.direction]
+                    nr, nc = r + dr, c + dc
+                    # If still out of bounds, skip this step
+                    if not (0 <= nr < self.size and 0 <= nc < self.size):
+                        continue
                 elif dyn.boundary_mode == "wrap":
                     nr = (nr + self.size) % self.size
                     nc = (nc + self.size) % self.size
