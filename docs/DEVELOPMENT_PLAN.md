@@ -67,10 +67,22 @@
 
 ### Phase 2 - 增强 Agent 智能
 **目标**: 提升 Agent 的导航策略和学习能力
-- [ ] 实现 Q-Learning / DQN 基准 Agent
-- [ ] 实现多步规划（不再每步都需要 LLM）
-- [ ] 添加记忆模块（过往路径记忆）
-- [ ] 增强 ReAct Agent 的 system prompt 和 few-shot 示例
+
+详细设计方案见: [docs/PLAN_PHASE2.md](PLAN_PHASE2.md)
+
+| 功能 | 状态 | 优先级 | 依赖 |
+|------|------|--------|------|
+| 记忆模块 (Memory Augmented Navigator) | 待实现 | P0 | 无 |
+| ReAct Agent Prompt 增强 | 待实现 | P0 | 无 |
+| Heuristic Navigator 墙跟随 + 回溯 | 待实现 | P0 | 无 |
+| 多步规划 (Plan Tool) | 待实现 | P1 | 功能 A1 |
+| Q-Learning 基准 Agent | 待实现 | P1 | 功能 A1 + A3 |
+
+- [ ] A1：记忆模块
+- [ ] A2：ReAct Agent Prompt 增强
+- [ ] A3：Heuristic Navigator 墙跟随 + 回溯
+- [ ] B1：多步规划
+- [ ] C1：Q-Learning 基准 Agent
 
 ### Phase 3 - 集成与部署
 **目标**: 完善项目可用性
