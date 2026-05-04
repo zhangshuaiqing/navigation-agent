@@ -126,6 +126,41 @@ def test_dynamic_obstacles():
     print("Dynamic obstacles test passed")
 
 
+def test_multi_goal_sequential():
+    env = GridWorld(size=6, num_goals=3, task_type="sequential", seed=42)
+    
+    # Check task exists
+    assert env.task is not None
+    assert env.task.type == "sequential"
+    assert len(env.all_goals) == 3
+    
+    # First goal should be active
+    assert env.goal_pos == env.all_goals[0]
+    
+    # Move to first goal
+    max_steps = 100
+    steps = 0
+    while env.agent_pos != env.goal_pos and not env.done and steps < max_steps:
+        path = env.get_shortest_path()
+        if path and len(path) > 1:
+            next_step = path[1]
+            dr = next_step[0] - env.agent_pos[0]
+            dc = next_step[1] - env.agent_pos[1]
+            action = {(-1, 0): "up", (1, 0): "down", (0, -1): "left", (0, 1): "right"}[(dr, dc)]
+            env.step(action)
+        else:
+            break
+        steps += 1
+    
+    print(f"After loop: agent={env.agent_pos}, goal={env.goal_pos}, active_idx={env.task.active_idx}, done={env.done}")
+    
+    # After reaching first goal, should move to second
+    assert env.task.active_idx >= 1, f"Expected active_idx >= 1, got {env.task.active_idx}"
+    if env.task.active_idx == 1:
+        assert env.goal_pos == env.all_goals[1]
+    print("Sequential multi-goal test passed")
+
+
 if __name__ == "__main__":
     test_gridworld_init()
     test_step()
@@ -136,4 +171,5 @@ if __name__ == "__main__":
     test_local_observation()
     test_fog_of_war()
     test_dynamic_obstacles()
+    test_multi_goal_sequential()
     print("All tests passed!")

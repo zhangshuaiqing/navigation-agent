@@ -56,7 +56,7 @@ class AppState:
             CellType.PATH: "#BBDEFB",
         }
 
-    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False, observation_mode="full", view_range=1, num_dynamic=0):
+    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False, observation_mode="full", view_range=1, num_dynamic=0, num_goals=1, task_type="sequential"):
         """Reset environment and agent."""
         seed_val = int(seed) if seed else None
         self.env = GridWorld(
@@ -67,6 +67,8 @@ class AppState:
             observation_mode=observation_mode,
             view_range=int(view_range),
             num_dynamic_obstacles=int(num_dynamic),
+            num_goals=int(num_goals),
+            task_type=task_type,
         )
         self.agent_type = agent_type
         self.path_history = [self.env.agent_pos]
@@ -189,6 +191,21 @@ class AppState:
                 elif self.env.grid[r, c] == CellType.DYNAMIC_OBSTACLE:
                     color = "#FF9800"  # Orange for dynamic obstacles
                     label = "D"
+                elif self.env.task and (r, c) in self.env.all_goals:
+                    idx = self.env.all_goals.index((r, c))
+                    is_completed = (
+                        idx < self.env.task.active_idx if self.env.task.type == "sequential"
+                        else idx in self.env.task.completed_goals
+                    )
+                    if (r, c) == self.env.goal_pos and not is_completed:
+                        color = "#FF5722"  # Active goal - bright orange
+                        label = "G"
+                    elif is_completed:
+                        color = "#4CAF50"  # Completed - green
+                        label = "C"
+                    else:
+                        color = "#BF360C"  # Pending - dark orange
+                        label = "g"
                 elif (r, c) in self.path_history[:-1]:
                     color = self.cell_colors[CellType.PATH]
                     label = ""
@@ -310,6 +327,15 @@ def create_ui():
                     minimum=0, maximum=10, value=0, step=1,
                     label="Dynamic Obstacles"
                 )
+                num_goals = gr.Slider(
+                    minimum=1, maximum=10, value=1, step=1,
+                    label="Number of Goals"
+                )
+                task_type = gr.Dropdown(
+                    choices=["sequential", "any_order", "collect"],
+                    value="sequential",
+                    label="Task Type"
+                )
                 delay_slider = gr.Slider(
                     minimum=0.05, maximum=2.0, value=0.3, step=0.05,
                     label="Auto-run Delay (seconds)"
@@ -327,7 +353,9 @@ def create_ui():
                 ---
                 **Legend:**
                 - A (green) = Agent
-                - G (orange) = Goal
+                - G (bright orange) = Active Goal
+                - g (dark orange) = Pending Goal
+                - C (green) = Completed Goal
                 - D (amber) = Dynamic Obstacle
                 - Blue arrows = Path taken
                 - Dark gray = Static Obstacle
@@ -353,9 +381,9 @@ def create_ui():
                 )
 
         # ── Event handlers ────────────────────────────────────
-        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg, obs_mode, view_range, num_dynamic):
+        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type):
             s = int(seed) if seed and seed > 0 else None
-            return state.reset(size, obs_ratio, s, a_type, llm, random_sg, obs_mode, view_range, num_dynamic)
+            return state.reset(size, obs_ratio, s, a_type, llm, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type)
 
         def on_step():
             return state.step()
@@ -369,7 +397,7 @@ def create_ui():
 
         reset_btn.click(
             fn=on_reset,
-            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg, obs_mode, view_range, num_dynamic],
+            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type],
             outputs=[grid_plot, status_text, log_output]
         )
 

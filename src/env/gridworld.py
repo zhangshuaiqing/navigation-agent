@@ -28,6 +28,61 @@ class DynamicObstacle:
     boundary_mode: str = "bounce"  # bounce, wrap, random
 
 
+@dataclass
+class Task:
+    """A multi-goal task for the agent."""
+    type: str = "sequential"  # sequential, any_order, collect
+    goals: List[Tuple[int, int]] = field(default_factory=list)
+    rewards: List[float] = field(default_factory=list)
+    completion_bonus: float = 5.0
+    
+    # Internal state
+    active_idx: int = 0
+    completed_goals: set = field(default_factory=set)
+    
+    @property
+    def current_goal(self) -> Optional[Tuple[int, int]]:
+        """Get the currently active goal."""
+        if self.type == "sequential":
+            if self.active_idx < len(self.goals):
+                return self.goals[self.active_idx]
+            return None
+        else:  # any_order or collect
+            remaining = set(range(len(self.goals))) - self.completed_goals
+            if remaining:
+                return self.goals[min(remaining)]
+            return None
+    
+    @property
+    def is_complete(self) -> bool:
+        """Check if all goals are completed."""
+        if self.type == "sequential":
+            return self.active_idx >= len(self.goals)
+        else:
+            return len(self.completed_goals) == len(self.goals)
+    
+    def complete_current(self) -> float:
+        """Mark current goal as complete and return reward."""
+        if self.is_complete:
+            return 0.0
+        
+        if self.type == "sequential":
+            idx = self.active_idx
+            self.active_idx += 1
+        else:
+            # Find the goal that matches current_goal
+            current = self.current_goal
+            idx = self.goals.index(current)
+            self.completed_goals.add(idx)
+        
+        reward = self.rewards[idx] if idx < len(self.rewards) else 1.0
+        
+        if self.is_complete:
+            reward += self.completion_bonus
+        
+        return reward
+
+
 class GridWorld:
     """
     A simple grid world environment.
@@ -54,6 +109,9 @@ class GridWorld:
         view_range: int = 1,
         num_dynamic_obstacles: int = 0,
         dynamic_obstacle_speed: int = 1,
+        task: Optional[Task] = None,
+        num_goals: int = 1,
+        task_type: str = "sequential",
     ):
         self.size = size
         self.obstacle_ratio = obstacle_ratio
@@ -74,6 +132,12 @@ class GridWorld:
         self.visited_mask: np.ndarray = np.zeros((size, size), dtype=bool)
         self.dynamic_obstacles: List[DynamicObstacle] = []
         
+        # Task system
+        self.task = task
+        self.num_goals = num_goals
+        self.task_type = task_type
+        self.all_goals: List[Tuple[int, int]] = []
+        
         self._generate_map()
     
     def _generate_map(self):
@@ -87,6 +151,24 @@ class GridWorld:
             self.agent_pos = (0, 0)
             self.goal_pos = (self.size - 1, self.size - 1)
         
+        # Generate multiple goals if task system is used or num_goals > 1
+        if self.task is not None:
+            # Use provided task goals
+            self.all_goals = self.task.goals.copy()
+            if self.all_goals:
+                self.goal_pos = self.all_goals[0]
+        elif self.num_goals > 1:
+            # Generate multiple random goals
+            self.all_goals = self._generate_goals(self.num_goals)
+            self.goal_pos = self.all_goals[0]
+            self.task = Task(
+                type=self.task_type,
+                goals=self.all_goals,
+                rewards=[1.0] * self.num_goals,
+            )
+        else:
+            self.all_goals = [self.goal_pos]
+        
         # Place obstacles
         num_obstacles = int(self.size * self.size * self.obstacle_ratio)
         flat_indices = self.np_rng.choice(
@@ -94,16 +176,23 @@ class GridWorld:
         )
         for idx in flat_indices:
             r, c = divmod(idx, self.size)
-            # Don't block start or goal
-            if (r, c) != self.agent_pos and (r, c) != self.goal_pos:
+            # Don't block start or any goal
+            blocked_positions = [self.agent_pos] + self.all_goals
+            if (r, c) not in blocked_positions:
                 self.grid[r, c] = CellType.OBSTACLE
         
-        # Ensure path exists (simple check: BFS from start to goal)
+        # Ensure path exists from agent to current goal
         if not self._path_exists(self.agent_pos, self.goal_pos):
             self._clear_path_to_goal()
         
+        # For sequential tasks, ensure paths between consecutive goals
+        if self.task and self.task.type == "sequential" and len(self.all_goals) > 1:
+            for i in range(len(self.all_goals) - 1):
+                if not self._path_exists(self.all_goals[i], self.all_goals[i + 1]):
+                    self._clear_path_between(self.all_goals[i], self.all_goals[i + 1])
+        
         self.grid[self.agent_pos] = CellType.AGENT
-        self.grid[self.goal_pos] = CellType.GOAL
+        self._update_goal_cells()
         
         # Initialize visited mask for fog_of_war mode
         self.visited_mask.fill(False)
@@ -111,6 +200,40 @@ class GridWorld:
         
         # Initialize dynamic obstacles
         self._init_dynamic_obstacles()
+    
+    def _generate_goals(self, n: int) -> List[Tuple[int, int]]:
+        """Generate N distinct random goal positions."""
+        all_cells = [(r, c) for r in range(self.size) for c in range(self.size)]
+        all_cells = [c for c in all_cells if c != self.agent_pos]
+        self.rng.shuffle(all_cells)
+        return all_cells[:n]
+    
+    def _update_goal_cells(self):
+        """Update grid to show all goal cells with their status."""
+        if not self.task or self.task.type != "collect":
+            # For sequential/any_order: show all goals
+            for i, goal in enumerate(self.all_goals):
+                if goal != self.agent_pos:
+                    self.grid[goal] = CellType.GOAL
+        else:
+            # For collect: only show uncompleted goals
+            for i, goal in enumerate(self.all_goals):
+                if i not in self.task.completed_goals and goal != self.agent_pos:
+                    self.grid[goal] = CellType.GOAL
+    
+    def _clear_path_between(self, start: Tuple[int, int], goal: Tuple[int, int]):
+        """Clear obstacles along a path between two points."""
+        r, c = start
+        gr, gc = goal
+        while (r, c) != (gr, gc):
+            if self.rng.random() < 0.5 and r != gr:
+                r += 1 if gr > r else -1
+            elif c != gc:
+                c += 1 if gc > c else -1
+            else:
+                r += 1 if gr > r else -1
+            if self.grid[r, c] == CellType.OBSTACLE:
+                self.grid[r, c] = CellType.EMPTY
     
     def _init_dynamic_obstacles(self):
         """Initialize dynamic obstacles on empty cells."""
@@ -299,6 +422,11 @@ class GridWorld:
         elif not self.random_start_goal:
             self.goal_pos = (self.size - 1, self.size - 1)
         
+        # Reset task state if exists
+        if self.task:
+            self.task.active_idx = 0
+            self.task.completed_goals = set()
+        
         if new_map:
             self._generate_map()
         else:
@@ -306,7 +434,10 @@ class GridWorld:
             self.grid[self.grid == CellType.AGENT] = CellType.EMPTY
             self.grid[self.grid == CellType.DYNAMIC_OBSTACLE] = CellType.EMPTY
             self.grid[self.agent_pos] = CellType.AGENT
-            self.grid[self.goal_pos] = CellType.GOAL
+            # Reset goals
+            if self.task:
+                self.goal_pos = self.all_goals[0] if self.all_goals else self.goal_pos
+            self._update_goal_cells()
             self._init_dynamic_obstacles()
         
         # Reset visited mask
@@ -351,13 +482,32 @@ class GridWorld:
             self.agent_pos = (new_r, new_c)
             self.grid[new_r, new_c] = CellType.AGENT
             
-            # Check goal
-            if self.agent_pos == self.goal_pos:
+            # Check if reached current goal
+            if self.task and self.agent_pos == self.goal_pos:
+                # Complete current sub-goal
+                sub_reward = self.task.complete_current()
+                reward = sub_reward
+                info = {"reason": "reached_sub_goal", "sub_reward": sub_reward}
+                
+                # Update to next goal if available
+                next_goal = self.task.current_goal
+                if next_goal is not None:
+                    self.goal_pos = next_goal
+                    info["next_goal"] = next_goal
+                    # Update grid to show new active goal
+                    self._update_goal_cells()
+                else:
+                    # All goals completed
+                    self.done = True
+                    info["reason"] = "reached_goal"
+                    info["all_goals_completed"] = True
+            elif not self.task and self.agent_pos == self.goal_pos:
+                # Single goal mode
                 reward = 10.0
                 self.done = True
                 info = {"reason": "reached_goal"}
             else:
-                # Distance-based reward
+                # Distance-based reward toward current goal
                 old_dist = abs(old_r - self.goal_pos[0]) + abs(old_c - self.goal_pos[1])
                 new_dist = abs(new_r - self.goal_pos[0]) + abs(new_c - self.goal_pos[1])
                 reward = 0.1 if new_dist < old_dist else -0.1
@@ -394,6 +544,8 @@ class GridWorld:
                         surroundings.append("A")
                     elif (nr, nc) == self.goal_pos:
                         surroundings.append("G")
+                    elif (nr, nc) in self.all_goals:
+                        surroundings.append("g")  # Other goals
                     elif self.grid[nr, nc] == CellType.OBSTACLE:
                         surroundings.append("#")
                     else:
@@ -426,9 +578,21 @@ class GridWorld:
                 dirs.append("E")
             goal_direction = "".join(dirs) if dirs else "HERE"
         
+        # Task info
+        task_info = None
+        if self.task:
+            task_info = {
+                "type": self.task.type,
+                "total_goals": len(self.task.goals),
+                "completed": self.task.active_idx if self.task.type == "sequential" else len(self.task.completed_goals),
+                "current_goal_index": self.all_goals.index(self.goal_pos) if self.goal_pos in self.all_goals else 0,
+                "all_goals": self.all_goals if self.observation_mode == "full" else None,
+            }
+        
         return {
             "agent_pos": self.agent_pos,
             "goal_pos": self.goal_pos if self.observation_mode == "full" else None,
+            "all_goals": self.all_goals if self.observation_mode == "full" else None,
             "goal_visible": goal_visible,
             "goal_direction": goal_direction,
             "grid_size": self.size,
@@ -438,6 +602,7 @@ class GridWorld:
             "max_steps": self.max_steps,
             "observation_mode": self.observation_mode,
             "view_range": self.view_range,
+            "task": task_info,
         }
     
     def render(self, mark_path: Optional[List[Tuple[int, int]]] = None, show_fog: bool = False) -> str:
@@ -452,7 +617,18 @@ class GridWorld:
                 elif (r, c) == self.agent_pos:
                     row_str += " A "
                 elif (r, c) == self.goal_pos:
-                    row_str += " G "
+                    row_str += " G "  # Active goal
+                elif self.task and (r, c) in self.all_goals:
+                    # Check goal status
+                    idx = self.all_goals.index((r, c))
+                    is_completed = (
+                        idx < self.task.active_idx if self.task.type == "sequential"
+                        else idx in self.task.completed_goals
+                    )
+                    if is_completed:
+                        row_str += " C "  # Completed goal
+                    else:
+                        row_str += " g "  # Pending goal
                 elif mark_path and (r, c) in mark_path:
                     row_str += " * "
                 elif self.grid[r, c] == CellType.OBSTACLE:

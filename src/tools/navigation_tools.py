@@ -138,6 +138,30 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
                 f"Explore to find it!"
             )
         
+        # Multi-goal task info
+        task = obs.get("task")
+        if task:
+            total = task["total_goals"]
+            completed = task["completed"]
+            current_idx = task["current_goal_index"]
+            result = f"Agent: ({ar}, {ac})\n"
+            result += f"Task: {task['type']} | Goals: {completed}/{total} completed\n"
+            result += f"Current goal #{current_idx + 1}: ({gr}, {gc})\n"
+            
+            # Show all goals with status
+            if obs.get("all_goals"):
+                result += "All goals:\n"
+                for i, goal in enumerate(obs["all_goals"]):
+                    if i == current_idx and not task.get("is_complete"):
+                        status = "ACTIVE"
+                    elif i < completed if task["type"] == "sequential" else i in env.task.completed_goals:
+                        status = "DONE"
+                    else:
+                        status = "pending"
+                    result += f"  [{i+1}] {goal}: {status}\n"
+            
+            return result.strip()
+        
         return (
             f"Agent: ({ar}, {ac}), Goal: ({gr}, {gc}), "
             f"Distance: {obs['distance_to_goal']}"
@@ -177,6 +201,15 @@ def create_navigation_tools(env: GridWorld) -> List[BaseTool]:
             direction = "LEFT"
         elif dc == 1:
             direction = "RIGHT"
+        
+        # Multi-goal info
+        if env.task and len(env.all_goals) > 1:
+            current_idx = env.all_goals.index(env.goal_pos) if env.goal_pos in env.all_goals else 0
+            return (
+                f"Hint: Move {direction} to ({next_step[0]}, {next_step[1]}). "
+                f"Shortest path length: {len(path) - 1} steps. "
+                f"Heading to goal #{current_idx + 1}/{len(env.all_goals)}."
+            )
         
         return (
             f"Hint: Move {direction} to ({next_step[0]}, {next_step[1]}). "

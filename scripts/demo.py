@@ -36,6 +36,8 @@ def parse_args():
     parser.add_argument("--obs-mode", type=str, default="full", choices=["full", "local", "fog_of_war"], help="Observation mode")
     parser.add_argument("--view-range", type=int, default=1, help="View range for local/fog modes")
     parser.add_argument("--dynamic", type=int, default=0, help="Number of dynamic obstacles")
+    parser.add_argument("--goals", type=int, default=1, help="Number of goals (multi-goal task)")
+    parser.add_argument("--task-type", type=str, default="sequential", choices=["sequential", "any_order", "collect"], help="Task type for multi-goal")
     parser.add_argument("--max-steps", type=int, default=None, help="Max steps per episode")
     parser.add_argument("--random-start-goal", action="store_true", help="Randomize start and goal positions")
     parser.add_argument("--no-render", action="store_true", help="Disable rendering")
@@ -53,6 +55,7 @@ def main():
     print(f"Random Start/Goal: {args.random_start_goal}")
     print(f"Observation Mode: {args.obs_mode}, View Range: {args.view_range}")
     print(f"Dynamic Obstacles: {args.dynamic}")
+    print(f"Goals: {args.goals}, Task Type: {args.task_type}")
     print(f"Agent: {'LLM ReAct (' + args.llm_model + ')' if args.use_llm else 'Heuristic/BFS'}")
     print("=" * 60)
     
@@ -64,6 +67,8 @@ def main():
         observation_mode=args.obs_mode,
         view_range=args.view_range,
         num_dynamic_obstacles=args.dynamic,
+        num_goals=args.goals,
+        task_type=args.task_type,
     )
     
     if args.use_llm:
