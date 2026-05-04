@@ -13,6 +13,7 @@ from langgraph.prebuilt import create_react_agent
 
 from ..env.gridworld import GridWorld
 from ..tools.navigation_tools import create_navigation_tools
+from .memory import AgentMemory
 
 
 class NavigationAgent:
@@ -27,6 +28,10 @@ class NavigationAgent:
         """Take an action based on observation. Returns action name."""
         raise NotImplementedError
     
+    def post_step(self):
+        """Called after env.step() to update agent state (e.g. memory)."""
+        pass
+    
     def reset(self):
         """Reset agent state."""
         self.history.clear()
@@ -35,12 +40,14 @@ class NavigationAgent:
 class HeuristicNavigator(NavigationAgent):
     """
     A heuristic-based navigator that doesn't require an LLM.
-    Uses simple wall-following / goal-seeking behavior.
+    Uses BFS, wall-following, dead-end backtracking, and memory.
     """
     
-    def __init__(self, env: GridWorld, use_bfs_hint: bool = True):
+    def __init__(self, env: GridWorld, use_bfs_hint: bool = True, use_memory: bool = True):
         super().__init__(env)
         self.use_bfs_hint = use_bfs_hint
+        self.use_memory = use_memory
+        self.memory = AgentMemory()
         self.last_positions: List[tuple] = []
         self.max_history = 10
     
@@ -81,12 +88,11 @@ class HeuristicNavigator(NavigationAgent):
         valid = self.env.get_valid_actions()
         
         def _score_action(action):
-            """Score an action for local navigation."""
             dr, dc = self.env.DIRECTIONS[action]
             nr, nc = ar + dr, ac + dc
             score = 0.0
             
-            # Base: prefer moves toward goal direction even when not visible
+            # Prefer moves toward goal direction even when not visible
             if goal_direction and not goal_visible:
                 direction_bonus = 0.0
                 if "N" in goal_direction and dr < 0:
@@ -100,16 +106,22 @@ class HeuristicNavigator(NavigationAgent):
                 score -= direction_bonus
             
             if goal_visible:
-                # Visible goal: minimize Manhattan distance
                 score += abs(nr - gr) + abs(nc - gc)
             else:
-                # Goal not visible: prefer exploring new areas
-                if not self.env.visited_mask[nr, nc]:
-                    score -= 5.0  # Reward unvisited cells
+                if self.use_memory:
+                    # Use memory to prefer unvisited cells
+                    if (nr, nc) not in self.memory.visited:
+                        score -= 5.0
+                    else:
+                        score += 1.0
                 else:
-                    score += 1.0  # Slight penalty for visited cells
+                    # Fallback to env visited_mask
+                    if not self.env.visited_mask[nr, nc]:
+                        score -= 5.0
+                    else:
+                        score += 1.0
             
-            # Strong penalty for revisiting very recent positions (avoid 2-step loops)
+            # Strong penalty for revisiting very recent positions
             if (nr, nc) in self.last_positions[-3:]:
                 score += 20.0
             elif (nr, nc) in self.last_positions:
@@ -117,7 +129,7 @@ class HeuristicNavigator(NavigationAgent):
             
             return score
         
-        # Score each action and pick the best
+        # Try 1: Goal visible or goal direction available
         best_action = None
         best_score = float('inf')
         
@@ -127,8 +139,33 @@ class HeuristicNavigator(NavigationAgent):
                 best_score = score
                 best_action = action
         
+        # Try 2: Dead-end backtracking (using memory)
+        if self.use_memory and best_action and best_score >= 10.0:
+            # All moves are bad (penalized as visited) - check for dead end
+            if self.memory.is_dead_end((ar, ac), self.env.size, valid):
+                backtrack_action = self.memory.backtrack((ar, ac))
+                if backtrack_action and backtrack_action in valid:
+                    reason = f"Dead-end backtrack to {self.memory.trajectory[-2] if len(self.memory.trajectory) >= 2 else 'previous'}"
+                    self.history.append({"action": backtrack_action, "reason": reason})
+                    self.last_positions.append((ar, ac))
+                    if len(self.last_positions) > self.max_history:
+                        self.last_positions.pop(0)
+                    return backtrack_action
+        
+        # Try 3: If all directions penalized, find any unvisited direction
+        if best_action is None or (best_score >= 10.0 and self.use_memory):
+            unvisited = self.memory.find_unvisited_direction((ar, ac), self.env.size, valid)
+            if unvisited:
+                best_action = unvisited
+                best_score = 0.0
+        
         if best_action is None and valid:
             best_action = valid[0]
+        
+        # Record fork points for future backtracking
+        if self.use_memory:
+            if self.memory.detect_fork((ar, ac), self.env.size, valid):
+                self.memory.record_fork((ar, ac), self.env.size, valid)
         
         self.last_positions.append(self.env.agent_pos)
         if len(self.last_positions) > self.max_history:
@@ -149,6 +186,21 @@ class HeuristicNavigator(NavigationAgent):
     def reset(self):
         super().reset()
         self.last_positions.clear()
+        self.memory.reset()
+        # Record initial position
+        self.post_step()
+    
+    def post_step(self):
+        """Update memory with post-move state."""
+        if not self.use_memory:
+            return
+        obs = self.env._get_obs()
+        self.memory.update(
+            pos=self.env.agent_pos,
+            obs=obs,
+            actions=self.memory.last_actions,
+            grid_size=self.env.size,
+        )
 
 
 class ReActNavigator(NavigationAgent):
@@ -266,6 +318,7 @@ def create_react_navigator(
 def create_heuristic_navigator(
     env: GridWorld,
     use_bfs_hint: bool = True,
+    use_memory: bool = True,
 ) -> HeuristicNavigator:
     """Factory function to create a heuristic navigator."""
-    return HeuristicNavigator(env, use_bfs_hint=use_bfs_hint)
+    return HeuristicNavigator(env, use_bfs_hint=use_bfs_hint, use_memory=use_memory)

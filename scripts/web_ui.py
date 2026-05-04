@@ -107,6 +107,7 @@ class AppState:
         self.step_count += 1
         self.total_reward += reward
         self.path_history.append(self.env.agent_pos)
+        self.agent.post_step()
 
         log_msg = f"Step {self.step_count}: {action} | Reward: {reward:+.2f} | {info.get('reason', '')}"
         self.logs.append(log_msg)
@@ -136,6 +137,7 @@ class AppState:
             self.step_count += 1
             self.total_reward += reward
             self.path_history.append(self.env.agent_pos)
+            self.agent.post_step()
 
             log_msg = f"Step {self.step_count}: {action} | Reward: {reward:+.2f}"
             self.logs.append(log_msg)

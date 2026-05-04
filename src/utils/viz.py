@@ -53,6 +53,7 @@ def render_episode(
         obs, reward, done, info = env.step(action)
         total_reward += reward
         path_taken.append(env.agent_pos)
+        agent.post_step()
         step += 1
         
         if verbose:
