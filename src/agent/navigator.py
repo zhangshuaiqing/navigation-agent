@@ -9,7 +9,6 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
 
 from ..env.gridworld import GridWorld
 from ..tools.navigation_tools import create_navigation_tools
@@ -336,7 +335,12 @@ class HeuristicNavigator(NavigationAgent):
 
 class ReActNavigator(NavigationAgent):
     """
-    A ReAct navigator powered by an LLM via LangGraph.
+    A ReAct navigator powered by an LLM via LangChain.
+    
+    Unlike using LangGraph's prebuilt ReAct agent (which auto-executes
+    the full tool loop in one invoke), this implementation controls
+    the loop manually — one LLM call per act() — so the environment
+    state stays in sync with the outer step loop.
     """
     
     def __init__(
@@ -345,7 +349,7 @@ class ReActNavigator(NavigationAgent):
         llm: Optional[BaseChatModel] = None,
         llm_provider: str = "openai",
         llm_model: Optional[str] = None,
-        max_iterations: int = 50,
+        max_iterations: int = 100,
     ):
         super().__init__(env)
         self.max_iterations = max_iterations
@@ -361,10 +365,8 @@ class ReActNavigator(NavigationAgent):
                 )
         
         self.llm = llm
-        self.agent = create_react_agent(
-            model=llm,
-            tools=self.tools,
-        )
+        # Bind tools so the LLM knows what's available
+        self.llm_with_tools = llm.bind_tools(self.tools)
         self.messages: List[Any] = []
         # Store provider info for display
         self.llm_provider = llm_provider
@@ -372,38 +374,54 @@ class ReActNavigator(NavigationAgent):
     
     def act(self, observation: Optional[Dict] = None) -> str:
         """
-        Run the ReAct agent for one episode or step.
+        Run one step of ReAct: LLM thinks, optionally calls a tool,
+        we extract the move direction and return it.
         
-        For gridworld, we prompt the agent to navigate and let it
-        decide when to move.
+        Manual loop control — one LLM call per act().
         """
         prompt = self._build_prompt()
         
-        result = self.agent.invoke({
-            "messages": self.messages + [HumanMessage(content=prompt)]
-        })
+        # Invoke LLM (with tools bound, it may return tool calls)
+        messages = self.messages + [HumanMessage(content=prompt)]
+        response = self.llm_with_tools.invoke(messages)
+        self.messages = messages + [response]
         
-        self.messages = result["messages"]
+        # Process tool calls — execute non-move tools, extract move direction
+        move_direction = None
         
-        # Extract the last tool call for 'move'
-        last_move = None
-        for msg in reversed(self.messages):
-            if isinstance(msg, AIMessage) and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    if tc["name"] == "move":
-                        last_move = tc["args"].get("direction", "")
-                        break
-            if last_move:
-                break
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            for tc in response.tool_calls:
+                if tc["name"] == "move":
+                    args = tc["args"]
+                    move_direction = args.get("direction", "")
+                    # Don't execute move tool — env.step() will be called externally
+                    # Just record the call so message chain has it
+                    self._append_move_result(tc, move_direction)
+                elif tc["name"] in ("sense_surroundings", "get_position", "get_path_hint"):
+                    self._execute_tool(tc)
+            
+            if move_direction:
+                self.history.append({
+                    "action": move_direction,
+                    "reason": "LLM ReAct: move call"
+                })
+                return move_direction
+            
+            # No move found, but some tools were executed; recurse
+            return self.act()
         
-        if last_move:
-            self.history.append({
-                "action": last_move,
-                "reason": "LLM ReAct decision"
-            })
-            return last_move
+        # Check if LLM responded with a text answer mentioning a direction
+        if response.content:
+            content_lower = response.content.lower()
+            for direction in ["up", "down", "left", "right"]:
+                if direction in content_lower:
+                    self.history.append({
+                        "action": direction,
+                        "reason": "LLM ReAct: extracted from text response"
+                    })
+                    return direction
         
-        # Fallback: no move made, try to get a valid action
+        # Fallback: try a valid action
         valid = self.env.get_valid_actions()
         fallback = valid[0] if valid else "up"
         self.history.append({
@@ -411,6 +429,46 @@ class ReActNavigator(NavigationAgent):
             "reason": "LLM did not produce move, using fallback"
         })
         return fallback
+    
+    def _execute_tool(self, tool_call):
+        """Execute a tool call and append the result to messages."""
+        tool_name = tool_call["name"]
+        tool_args = tool_call.get("args", {})
+        tool_call_id = getattr(tool_call, 'id', None) or tool_call.get("id", "")
+        
+        for tool in self.tools:
+            if tool.name == tool_name:
+                try:
+                    result = tool.invoke(tool_args)
+                    self.messages.append(ToolMessage(
+                        content=str(result),
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                    ))
+                except Exception as e:
+                    self.messages.append(ToolMessage(
+                        content=f"Error: {e}",
+                        tool_call_id=tool_call_id,
+                        name=tool_name,
+                    ))
+                break
+    
+    def _append_move_result(self, tool_call, direction):
+        """Append a move result to the message chain without actually stepping."""
+        tool_call_id = getattr(tool_call, 'id', None) or tool_call.get("id", "")
+        ar, ac = self.env.agent_pos
+        gr, gc = self.env.goal_pos
+        dist = abs(ar - gr) + abs(ac - gc)
+        result = (
+            f"OK, you chose to move {direction}. "
+            f"After the move, you will be at ({ar}, {ac}) and the goal is at ({gr}, {gc}), "
+            f"Manhattan distance: {dist}."
+        )
+        self.messages.append(ToolMessage(
+            content=result,
+            tool_call_id=tool_call_id,
+            name="move",
+        ))
     
     def _build_prompt(self) -> str:
         """Build the navigation prompt for the LLM, adapting to environment settings."""
@@ -479,9 +537,13 @@ class ReActNavigator(NavigationAgent):
         
         # ── Tools ────────────────────────────────────────
         lines.append("")
+        lines.append("CRITICAL RULE: You must make exactly ONE move at a time.")
+        lines.append("After each move, you will be called again with the new state.")
+        lines.append("Do NOT try to plan multiple steps in one response.")
+        lines.append("")
         lines.append("Available tools:")
         lines.append("- sense_surroundings: See what's around you (always available)")
-        lines.append("- move(direction): Move in one of the valid directions")
+        lines.append("- move(direction): Move in one of the valid directions. Return this!")
         lines.append("- get_position: Check current position and goal progress")
         if mode == "full":
             lines.append("- get_path_hint: BFS shortest path to current goal")
@@ -490,23 +552,22 @@ class ReActNavigator(NavigationAgent):
         
         # ── Strategy hints (scenario-specific) ───────────
         lines.append("")
-        lines.append("Strategy:")
+        lines.append("Strategy (pick ONE move then stop):")
         if mode == "full" and (not task or total_goals == 1):
-            lines.append("1. Use get_path_hint to get the optimal path")
-            lines.append("2. move() in the suggested direction")
-            lines.append("3. Repeat until goal reached")
+            lines.append("1. Call get_path_hint() to get the optimal next step")
+            lines.append("2. Call move() in the suggested direction")
         elif mode == "full" and total_goals > 1 and task_type == "sequential":
-            lines.append("1. Use get_path_hint to get path to current goal")
-            lines.append("2. move() toward it. After reaching a goal, get_path_hint points to the next one.")
+            lines.append("1. Call get_path_hint() to get path to current goal")
+            lines.append("2. Call move() in the suggested direction")
             lines.append(f"3. Complete all {total_goals} goals in order.")
         elif mode in ("local", "fog_of_war"):
-            lines.append("1. Start with sense_surroundings to see nearby cells")
-            lines.append("2. Move toward the goal direction hint")
+            lines.append("1. Call sense_surroundings() first to see nearby cells")
+            lines.append("2. Call move() toward the goal direction hint")
             lines.append("3. If blocked, explore alternate paths")
-            lines.append("4. Use sense_surroundings after each move to update your view")
+            lines.append("4. Call sense_surroundings() after each move")
         
         lines.append("")
-        lines.append("Think step by step. Make ONE move at a time.")
+        lines.append("IMPORTANT: Call move() with the exact direction. Do NOT describe a path.")
         
         return "\n".join(lines)
     
