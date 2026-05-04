@@ -128,6 +128,69 @@ echo 'MOONSHOT_API_KEY="sk-your-key"' >> .env
 访问 https://platform.openai.com/api-keys 创建 key。
 推荐使用 `gpt-4o-mini` 模型（低成本、速度快）。
 
+## 本地模型配置
+
+### Ollama (推荐，最简单)
+确保已安装 [Ollama](https://ollama.com) 并启动后：
+
+```bash
+# 拉取模型（任选一个）
+ollama pull qwen2.5:7b       # 7B 参数，速度快
+ollama pull llama3.2:3b      # 更轻量
+
+# 无需额外配置，直接使用
+uv run python scripts/demo.py --use-llm --llm-provider ollama --llm-model qwen2.5:7b
+```
+
+默认 Ollama API 地址为 `http://localhost:11434/v1`。
+如果 Ollama 运行在非默认端口：
+```bash
+export OLLAMA_BASE_URL="http://your-host:11434/v1"
+```
+
+### vLLM (高性能推理)
+确保已安装 [vLLM](https://docs.vllm.ai) 并启动服务：
+
+```bash
+# 启动 vLLM 服务
+vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000
+
+# 连接使用
+uv run python scripts/demo.py --use-llm --llm-provider vllm
+
+# 自定义地址
+export VLLM_BASE_URL="http://your-server:8000/v1"
+```
+
+### 自定义 OpenAI 兼容 API
+对接任何兼容 OpenAI API 格式的本地/远程服务：
+
+```bash
+# 设置环境变量
+export CUSTOM_LLM_BASE_URL="http://your-endpoint:port/v1"
+export CUSTOM_LLM_MODEL="your-model-name"
+export CUSTOM_LLM_API_KEY="sk-..."  # 可选，无认证可跳过
+
+# 使用
+uv run python scripts/demo.py --use-llm --llm-provider custom
+```
+
+支持的服务包括：
+- **vLLM** (本地推理)
+- **llama.cpp / llama-server** (本地推理)
+- **Xinference** (本地推理)
+- **TensorRT-LLM** (本地推理)
+- **任何 OpenAI 兼容的 API 代理**
+
+### 推荐模型
+
+| 模型 | 适合导航任务 | 参数 | Provider |
+|------|-------------|------|----------|
+| `qwen2.5:7b` | ⭐⭐⭐ | 7B | ollama |
+| `llama3.2:3b` | ⭐⭐ | 3B | ollama |
+| `Qwen2.5-7B-Instruct` | ⭐⭐⭐ | 7B | vllm |
+| `gpt-4o-mini` | ⭐⭐⭐ | - | openai |
+
 ## 扩展建议
 
 - 添加键盘快捷键（方向键控制 Agent）

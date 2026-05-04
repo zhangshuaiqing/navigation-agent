@@ -312,12 +312,14 @@ def create_ui():
                 llm_model = gr.Dropdown(
                     choices=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo",
                              "deepseek-chat", "deepseek-reasoner",
-                             "moonshot-v1-8k", "moonshot-v1-32k"],
+                             "moonshot-v1-8k", "moonshot-v1-32k",
+                             "qwen2.5:7b", "qwen2.5:14b", "llama3.2:3b",
+                             "Qwen/Qwen2.5-7B-Instruct"],
                     value="gpt-4o-mini",
                     label="LLM Model"
                 )
                 llm_provider = gr.Dropdown(
-                    choices=["openai", "deepseek", "kimi"],
+                    choices=["openai", "deepseek", "kimi", "ollama", "vllm", "custom"],
                     value="openai",
                     label="LLM Provider"
                 )

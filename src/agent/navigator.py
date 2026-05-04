@@ -23,21 +23,37 @@ from .memory import AgentMemory
 LLM_PROVIDERS = {
     "openai": {
         "env_key": "OPENAI_API_KEY",
-        "class": "langchain_openai.ChatOpenAI",
         "default_model": "gpt-4o-mini",
         "base_url": None,
     },
     "deepseek": {
         "env_key": "DEEPSEEK_API_KEY",
-        "class": "langchain_openai.ChatOpenAI",
         "default_model": "deepseek-chat",
         "base_url": "https://api.deepseek.com",
     },
     "kimi": {
         "env_key": "MOONSHOT_API_KEY",
-        "class": "langchain_openai.ChatOpenAI",
         "default_model": "moonshot-v1-8k",
         "base_url": "https://api.moonshot.cn/v1",
+    },
+    "ollama": {
+        "env_key": "OLLAMA_BASE_URL",
+        "default_model": "qwen2.5:7b",
+        "base_url": "http://localhost:11434/v1",
+        "api_key_optional": True,
+    },
+    "vllm": {
+        "env_key": "VLLM_BASE_URL",
+        "default_model": "Qwen/Qwen2.5-7B-Instruct",
+        "base_url": "http://localhost:8000/v1",
+        "api_key_optional": True,
+    },
+    "custom": {
+        "env_key": "CUSTOM_LLM_BASE_URL",
+        "default_model": None,
+        "base_url": None,
+        "api_key_optional": True,
+        "requires_env": ["CUSTOM_LLM_BASE_URL", "CUSTOM_LLM_MODEL"],
     },
 }
 
@@ -50,7 +66,7 @@ def get_llm(
     """Create an LLM instance from the specified provider.
     
     Args:
-        provider: One of 'openai', 'deepseek', 'kimi'
+        provider: One of 'openai', 'deepseek', 'kimi', 'ollama', 'vllm', 'custom'
         model: Model name (defaults to provider's default)
         temperature: LLM temperature
     
@@ -58,7 +74,7 @@ def get_llm(
         A ChatOpenAI-compatible LLM instance
     
     Raises:
-        ValueError: If provider is unknown or API key is not set
+        ValueError: If provider is unknown or required config is missing
     """
     if provider not in LLM_PROVIDERS:
         raise ValueError(
@@ -67,6 +83,51 @@ def get_llm(
         )
     
     cfg = LLM_PROVIDERS[provider]
+    
+    # Handle custom provider with required env vars
+    if provider == "custom":
+        requires = cfg.get("requires_env", [])
+        for var in requires:
+            val = os.environ.get(var)
+            if not val:
+                raise ValueError(
+                    f"Custom provider requires '{var}' to be set.\n"
+                    f"Example:\n"
+                    f"  export CUSTOM_LLM_BASE_URL=\"http://your-endpoint:port/v1\"\n"
+                    f"  export CUSTOM_LLM_MODEL=\"your-model-name\"\n"
+                    f"  export CUSTOM_LLM_API_KEY=\"sk-...\"  # optional, skip if no auth"
+                )
+        base_url = os.environ.get("CUSTOM_LLM_BASE_URL")
+        model = model or os.environ.get("CUSTOM_LLM_MODEL")
+        api_key = os.environ.get("CUSTOM_LLM_API_KEY", "not-needed")
+        kwargs = {
+            "model": model,
+            "temperature": temperature,
+            "api_key": api_key,
+            "base_url": base_url,
+        }
+        return ChatOpenAI(**kwargs)
+    
+    # Local providers (ollama, vllm) - API key is optional
+    base_url = cfg.get("base_url")
+    env_base_url = os.environ.get(cfg["env_key"])
+    if env_base_url:
+        base_url = env_base_url
+    
+    api_key_optional = cfg.get("api_key_optional", False)
+    
+    if api_key_optional:
+        # No API key required for local models, use a dummy one
+        api_key = os.environ.get(cfg["env_key"] + "_API_KEY", "ollama")
+        kwargs = {
+            "model": model or cfg["default_model"],
+            "temperature": temperature,
+            "api_key": api_key,
+            "base_url": base_url,
+        }
+        return ChatOpenAI(**kwargs)
+    
+    # Cloud providers - API key is required
     api_key = os.environ.get(cfg["env_key"])
     if not api_key:
         raise ValueError(
@@ -80,7 +141,7 @@ def get_llm(
         "temperature": temperature,
         "api_key": api_key,
     }
-    if cfg["base_url"]:
+    if cfg.get("base_url"):
         kwargs["base_url"] = cfg["base_url"]
     
     return ChatOpenAI(**kwargs)

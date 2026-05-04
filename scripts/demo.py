@@ -33,7 +33,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--delay", type=float, default=0.3, help="Step delay in seconds (default: 0.3)")
     parser.add_argument("--use-llm", action="store_true", help="Use LLM-powered ReAct agent")
-    parser.add_argument("--llm-provider", type=str, default="openai", choices=["openai", "deepseek", "kimi"], help="LLM provider")
+    parser.add_argument("--llm-provider", type=str, default="openai", choices=["openai", "deepseek", "kimi", "ollama", "vllm", "custom"], help="LLM provider")
     parser.add_argument("--llm-model", type=str, default=None, help="LLM model name (defaults to provider default)")
     parser.add_argument("--benchmark", type=int, default=None, help="Run benchmark over N episodes")
     parser.add_argument("--obs-mode", type=str, default="full", choices=["full", "local", "fog_of_war"], help="Observation mode")
