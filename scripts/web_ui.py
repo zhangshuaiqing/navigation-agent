@@ -56,7 +56,7 @@ class AppState:
             CellType.PATH: "#BBDEFB",
         }
 
-    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, random_start_goal=False, observation_mode="full", view_range=1, num_dynamic=0, num_goals=1, task_type="sequential"):
+    def reset(self, size, obstacle_ratio, seed, agent_type, llm_model, llm_provider, random_start_goal=False, observation_mode="full", view_range=1, num_dynamic=0, num_goals=1, task_type="sequential"):
         """Reset environment and agent."""
         seed_val = int(seed) if seed else None
         self.env = GridWorld(
@@ -78,15 +78,17 @@ class AppState:
         self.logs = ["Environment reset."]
 
         if agent_type == "llm":
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if not api_key:
-                self.logs.append("WARNING: OPENAI_API_KEY not set! Falling back to heuristic.")
+            try:
+                self.agent = create_react_navigator(
+                    self.env,
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                )
+                self.logs.append(f"LLM: {llm_provider}/{llm_model}")
+            except ValueError as e:
+                self.logs.append(f"WARNING: {e}. Falling back to heuristic.")
                 self.agent = create_heuristic_navigator(self.env, use_bfs_hint=True)
                 self.agent_type = "heuristic"
-            else:
-                from langchain_openai import ChatOpenAI
-                llm = ChatOpenAI(model=llm_model, temperature=0)
-                self.agent = create_react_navigator(self.env, llm=llm)
         else:
             self.agent = create_heuristic_navigator(self.env, use_bfs_hint=True)
 
@@ -308,9 +310,16 @@ def create_ui():
                     label="Agent Type"
                 )
                 llm_model = gr.Dropdown(
-                    choices=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+                    choices=["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo",
+                             "deepseek-chat", "deepseek-reasoner",
+                             "moonshot-v1-8k", "moonshot-v1-32k"],
                     value="gpt-4o-mini",
-                    label="LLM Model (for LLM agent)"
+                    label="LLM Model"
+                )
+                llm_provider = gr.Dropdown(
+                    choices=["openai", "deepseek", "kimi"],
+                    value="openai",
+                    label="LLM Provider"
                 )
                 random_sg = gr.Checkbox(
                     value=False,
@@ -383,9 +392,9 @@ def create_ui():
                 )
 
         # ── Event handlers ────────────────────────────────────
-        def on_reset(size, obs_ratio, seed, a_type, llm, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type):
+        def on_reset(size, obs_ratio, seed, a_type, llm, llm_provider, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type):
             s = int(seed) if seed and seed > 0 else None
-            return state.reset(size, obs_ratio, s, a_type, llm, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type)
+            return state.reset(size, obs_ratio, s, a_type, llm, llm_provider, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type)
 
         def on_step():
             return state.step()
@@ -399,7 +408,7 @@ def create_ui():
 
         reset_btn.click(
             fn=on_reset,
-            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type],
+            inputs=[grid_size, obstacle_ratio, seed_input, agent_type, llm_model, llm_provider, random_sg, obs_mode, view_range, num_dynamic, num_goals, task_type],
             outputs=[grid_plot, status_text, log_output]
         )
 

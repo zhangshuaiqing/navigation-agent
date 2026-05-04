@@ -24,8 +24,11 @@ cd /media/zsq-508/data/project/navigation-agent
 # 安装依赖（已包含在项目 pyproject.toml 中）
 uv sync
 
-# （可选）配置 OpenAI API Key，用于 LLM ReAct Agent
-echo 'OPENAI_API_KEY="sk-your-api-key"' >> .env
+# （可选）配置 API Key，用于 LLM ReAct Agent
+# 至少设置以下其中一个：
+# export OPENAI_API_KEY="sk-your-key"     # OpenAI
+# export DEEPSEEK_API_KEY="sk-your-key"    # DeepSeek
+# export MOONSHOT_API_KEY="sk-your-key"    # Kimi (Moonshot)
 ```
 
 ### 运行 CLI Demo
@@ -40,9 +43,11 @@ uv run python scripts/demo.py --size 8 --seed 42 --delay 0.3
 # Benchmark 20 轮
 uv run python scripts/demo.py --benchmark 20 --no-render
 
-# LLM ReAct Agent（需要 OPENAI_API_KEY）
-export OPENAI_API_KEY="sk-your-api-key"  # 或已写入 .env 则可跳过
-uv run python scripts/demo.py --use-llm --llm-model gpt-4o-mini
+# LLM ReAct Agent（需要 API Key）
+# 支持多个 provider: openai / deepseek / kimi
+uv run python scripts/demo.py --use-llm --llm-provider openai --llm-model gpt-4o-mini
+uv run python scripts/demo.py --use-llm --llm-provider deepseek
+uv run python scripts/demo.py --use-llm --llm-provider kimi
 ```
 
 ### 启动 Web UI

@@ -113,7 +113,14 @@ uv run python scripts/demo.py --use-llm
 
 ### .env 文件（推荐）
 ```bash
-echo 'OPENAI_API_KEY="sk-your-api-key"' >> .env
+# OpenAI
+echo 'OPENAI_API_KEY="sk-your-key"' >> .env
+
+# DeepSeek
+echo 'DEEPSEEK_API_KEY="sk-your-key"' >> .env
+
+# Kimi (Moonshot)
+echo 'MOONSHOT_API_KEY="sk-your-key"' >> .env
 ```
 `.env` 已在 `.gitignore` 中，不会提交到仓库。
 

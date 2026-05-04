@@ -113,15 +113,23 @@ def test_heuristic_with_memory():
 def test_react_prompt_basic():
     """Test that ReAct prompt includes basic info."""
     env = GridWorld(size=6, seed=42)
-    # We can't instantiate ReActNavigator without API key, so test the prompt logic directly
     from src.agent.navigator import ReActNavigator
+    
+    # Can test with get_llm if any provider key is set
+    from src.agent.navigator import get_llm, LLM_PROVIDERS
     import os
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("Skipping ReAct prompt test (no API key)")
+    
+    provider_found = None
+    for name, cfg in LLM_PROVIDERS.items():
+        if os.environ.get(cfg["env_key"]):
+            provider_found = name
+            break
+    
+    if not provider_found:
+        print("Skipping ReAct prompt test (no LLM API key found)")
         return
     
-    from langchain_openai import ChatOpenAI
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    llm = get_llm(provider=provider_found)
     agent = ReActNavigator(env, llm=llm)
     
     prompt = agent._build_prompt()

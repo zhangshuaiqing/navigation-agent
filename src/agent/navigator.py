@@ -16,6 +16,76 @@ from ..tools.navigation_tools import create_navigation_tools
 from .memory import AgentMemory
 
 
+# ═══════════════════════════════════════════════════════════════
+# LLM Provider configuration
+# ═══════════════════════════════════════════════════════════════
+
+LLM_PROVIDERS = {
+    "openai": {
+        "env_key": "OPENAI_API_KEY",
+        "class": "langchain_openai.ChatOpenAI",
+        "default_model": "gpt-4o-mini",
+        "base_url": None,
+    },
+    "deepseek": {
+        "env_key": "DEEPSEEK_API_KEY",
+        "class": "langchain_openai.ChatOpenAI",
+        "default_model": "deepseek-chat",
+        "base_url": "https://api.deepseek.com",
+    },
+    "kimi": {
+        "env_key": "MOONSHOT_API_KEY",
+        "class": "langchain_openai.ChatOpenAI",
+        "default_model": "moonshot-v1-8k",
+        "base_url": "https://api.moonshot.cn/v1",
+    },
+}
+
+
+def get_llm(
+    provider: str = "openai",
+    model: Optional[str] = None,
+    temperature: float = 0,
+) -> BaseChatModel:
+    """Create an LLM instance from the specified provider.
+    
+    Args:
+        provider: One of 'openai', 'deepseek', 'kimi'
+        model: Model name (defaults to provider's default)
+        temperature: LLM temperature
+    
+    Returns:
+        A ChatOpenAI-compatible LLM instance
+    
+    Raises:
+        ValueError: If provider is unknown or API key is not set
+    """
+    if provider not in LLM_PROVIDERS:
+        raise ValueError(
+            f"Unknown provider: {provider}. "
+            f"Available: {', '.join(LLM_PROVIDERS.keys())}"
+        )
+    
+    cfg = LLM_PROVIDERS[provider]
+    api_key = os.environ.get(cfg["env_key"])
+    if not api_key:
+        raise ValueError(
+            f"{cfg['env_key']} not set. "
+            f"Set the environment variable '{cfg['env_key']}' "
+            f"or provide an LLM instance directly."
+        )
+    
+    kwargs = {
+        "model": model or cfg["default_model"],
+        "temperature": temperature,
+        "api_key": api_key,
+    }
+    if cfg["base_url"]:
+        kwargs["base_url"] = cfg["base_url"]
+    
+    return ChatOpenAI(**kwargs)
+
+
 class NavigationAgent:
     """Base class for navigation agents."""
     
@@ -212,19 +282,21 @@ class ReActNavigator(NavigationAgent):
         self,
         env: GridWorld,
         llm: Optional[BaseChatModel] = None,
+        llm_provider: str = "openai",
+        llm_model: Optional[str] = None,
         max_iterations: int = 50,
     ):
         super().__init__(env)
         self.max_iterations = max_iterations
         
         if llm is None:
-            api_key = os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-            else:
+            try:
+                llm = get_llm(provider=llm_provider, model=llm_model)
+            except ValueError as e:
                 raise ValueError(
-                    "No LLM provided and OPENAI_API_KEY not set. "
-                    "Please provide an LLM or set the API key."
+                    f"Failed to create LLM for provider '{llm_provider}': {e}\n"
+                    f"Either provide an 'llm' instance directly, "
+                    f"or set the appropriate environment variable."
                 )
         
         self.llm = llm
@@ -233,6 +305,9 @@ class ReActNavigator(NavigationAgent):
             tools=self.tools,
         )
         self.messages: List[Any] = []
+        # Store provider info for display
+        self.llm_provider = llm_provider
+        self.llm_model = llm.model_name if hasattr(llm, 'model_name') else str(llm.model)
     
     def act(self, observation: Optional[Dict] = None) -> str:
         """
@@ -382,9 +457,18 @@ class ReActNavigator(NavigationAgent):
 def create_react_navigator(
     env: GridWorld,
     llm: Optional[BaseChatModel] = None,
+    llm_provider: str = "openai",
+    llm_model: Optional[str] = None,
 ) -> ReActNavigator:
-    """Factory function to create a ReAct navigator."""
-    return ReActNavigator(env, llm=llm)
+    """Factory function to create a ReAct navigator.
+    
+    Args:
+        env: GridWorld environment
+        llm: Optional pre-configured LLM instance
+        llm_provider: Provider name if no LLM given ('openai', 'deepseek', 'kimi')
+        llm_model: Model name override (defaults to provider's default)
+    """
+    return ReActNavigator(env, llm=llm, llm_provider=llm_provider, llm_model=llm_model)
 
 
 def create_heuristic_navigator(

@@ -5,8 +5,10 @@ Navigation Agent Demo Script
 Run with:
     uv run python scripts/demo.py
 
-For LLM-powered agent (requires OPENAI_API_KEY):
-    uv run python scripts/demo.py --use-llm
+For LLM-powered agent:
+    uv run python scripts/demo.py --use-llm --llm-provider openai
+    uv run python scripts/demo.py --use-llm --llm-provider deepseek
+    uv run python scripts/demo.py --use-llm --llm-provider kimi
 
 Benchmark mode:
     uv run python scripts/demo.py --benchmark 100
@@ -20,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.env.gridworld import GridWorld
-from src.agent.navigator import create_heuristic_navigator, create_react_navigator
+from src.agent.navigator import create_heuristic_navigator, create_react_navigator, LLM_PROVIDERS
 from src.utils.viz import render_episode, benchmark_agent
 
 
@@ -31,7 +33,8 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=None, help="Random seed")
     parser.add_argument("--delay", type=float, default=0.3, help="Step delay in seconds (default: 0.3)")
     parser.add_argument("--use-llm", action="store_true", help="Use LLM-powered ReAct agent")
-    parser.add_argument("--llm-model", type=str, default="gpt-4o-mini", help="LLM model name")
+    parser.add_argument("--llm-provider", type=str, default="openai", choices=["openai", "deepseek", "kimi"], help="LLM provider")
+    parser.add_argument("--llm-model", type=str, default=None, help="LLM model name (defaults to provider default)")
     parser.add_argument("--benchmark", type=int, default=None, help="Run benchmark over N episodes")
     parser.add_argument("--obs-mode", type=str, default="full", choices=["full", "local", "fog_of_war"], help="Observation mode")
     parser.add_argument("--view-range", type=int, default=1, help="View range for local/fog modes")
@@ -56,7 +59,7 @@ def main():
     print(f"Observation Mode: {args.obs_mode}, View Range: {args.view_range}")
     print(f"Dynamic Obstacles: {args.dynamic}")
     print(f"Goals: {args.goals}, Task Type: {args.task_type}")
-    print(f"Agent: {'LLM ReAct (' + args.llm_model + ')' if args.use_llm else 'Heuristic/BFS'}")
+    print(f"Agent: {'LLM ReAct (' + (args.llm_model or LLM_PROVIDERS[args.llm_provider]['default_model']) + ' via ' + args.llm_provider + ')' if args.use_llm else 'Heuristic/BFS'}")
     print("=" * 60)
     
     env = GridWorld(
@@ -72,16 +75,13 @@ def main():
     )
     
     if args.use_llm:
-        import os
-        if not os.environ.get("OPENAI_API_KEY"):
-            print("\nERROR: OPENAI_API_KEY not set!")
-            print("Set it with: export OPENAI_API_KEY='your-key'")
-            print("Or use heuristic agent without --use-llm\n")
-            sys.exit(1)
+        from src.agent.navigator import LLM_PROVIDERS
+        provider_cfg = LLM_PROVIDERS.get(args.llm_provider, {})
+        model_name = args.llm_model or provider_cfg.get("default_model", "unknown")
+        print(f"\nINFO: Using LLM provider '{args.llm_provider}' with model '{model_name}'")
+        print(f"INFO: Set {provider_cfg.get('env_key', 'OPENAI_API_KEY')} environment variable\n")
         
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(model=args.llm_model, temperature=0)
-        agent = create_react_navigator(env, llm=llm)
+        agent = create_react_navigator(env, llm_provider=args.llm_provider, llm_model=args.llm_model)
     else:
         agent = create_heuristic_navigator(env, use_bfs_hint=True)
     
