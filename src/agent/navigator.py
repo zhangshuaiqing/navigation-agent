@@ -377,7 +377,11 @@ class ReActNavigator(NavigationAgent):
         Run one step of ReAct: LLM thinks, optionally calls a tool,
         we extract the move direction and return it.
         
-        Manual loop control — one LLM call per act().
+        Returns:
+            The action direction string (one of 'up', 'down', 'left', 'right')
+            
+        The LLM's thought process and tool calls are stored in self.history
+        and can be retrieved via get_last_llm_thought().
         """
         prompt = self._build_prompt()
         
@@ -386,16 +390,25 @@ class ReActNavigator(NavigationAgent):
         response = self.llm_with_tools.invoke(messages)
         self.messages = messages + [response]
         
+        # Record LLM thought for display
+        llm_thought = ""
+        if response.content:
+            # Extract the text part (thought) before any tool calls
+            llm_thought = response.content.strip()
+        
         # Process tool calls — execute non-move tools, extract move direction
         move_direction = None
+        tool_names = []
         
         if hasattr(response, 'tool_calls') and response.tool_calls:
             for tc in response.tool_calls:
+                tool_names.append(tc["name"])
+                args_str = ", ".join(f"{k}={v}" for k, v in tc.get("args", {}).items())
+                tool_info = f"{tc['name']}({args_str})"
+                
                 if tc["name"] == "move":
                     args = tc["args"]
                     move_direction = args.get("direction", "")
-                    # Don't execute move tool — env.step() will be called externally
-                    # Just record the call so message chain has it
                     self._append_move_result(tc, move_direction)
                 elif tc["name"] in ("sense_surroundings", "get_position", "get_path_hint"):
                     self._execute_tool(tc)
@@ -403,11 +416,19 @@ class ReActNavigator(NavigationAgent):
             if move_direction:
                 self.history.append({
                     "action": move_direction,
-                    "reason": "LLM ReAct: move call"
+                    "reason": f"LLM: {llm_thought[:100]}" if llm_thought else "LLM ReAct: move call",
+                    "llm_thought": llm_thought,
+                    "tool_calls": tool_names,
                 })
                 return move_direction
             
             # No move found, but some tools were executed; recurse
+            self.history.append({
+                "action": None,
+                "reason": f"LLM thinking: {llm_thought[:100]}" if llm_thought else "LLM called tools",
+                "llm_thought": llm_thought,
+                "tool_calls": tool_names,
+            })
             return self.act()
         
         # Check if LLM responded with a text answer mentioning a direction
@@ -417,18 +438,32 @@ class ReActNavigator(NavigationAgent):
                 if direction in content_lower:
                     self.history.append({
                         "action": direction,
-                        "reason": "LLM ReAct: extracted from text response"
+                        "reason": f"LLM: {llm_thought[:100]}" if llm_thought else "LLM text response",
+                        "llm_thought": llm_thought,
+                        "tool_calls": [],
                     })
                     return direction
         
-        # Fallback: try a valid action
+        # Fallback
         valid = self.env.get_valid_actions()
         fallback = valid[0] if valid else "up"
         self.history.append({
             "action": fallback,
-            "reason": "LLM did not produce move, using fallback"
+            "reason": f"LLM fallback (no move found)",
+            "llm_thought": llm_thought,
+            "tool_calls": [],
         })
         return fallback
+    
+    def get_last_thought(self) -> Optional[Dict]:
+        """Get the last LLM thought from history for display purposes."""
+        if self.history:
+            entry = self.history[-1]
+            thought = entry.get("llm_thought", "")
+            tools = entry.get("tool_calls", [])
+            if thought or tools:
+                return {"thought": thought, "tools": tools}
+        return None
     
     def _execute_tool(self, tool_call):
         """Execute a tool call and append the result to messages."""

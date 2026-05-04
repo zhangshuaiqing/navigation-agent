@@ -50,6 +50,11 @@ def render_episode(
         obs = env._get_obs()
         action = agent.act(obs)
         
+        # Show LLM thought if available (ReAct agent)
+        thought = None
+        if hasattr(agent, 'get_last_thought'):
+            thought = agent.get_last_thought()
+        
         obs, reward, done, info = env.step(action)
         total_reward += reward
         path_taken.append(env.agent_pos)
@@ -64,6 +69,16 @@ def render_episode(
             print(f"Step {step}/{max_steps} | Action: {action:6s} | Reward: {reward:+.2f}")
             print(f"Total reward: {total_reward:.2f} | Distance: {obs['distance_to_goal']}")
             print(f"Reason: {info.get('reason', 'N/A')}")
+            if thought:
+                thought_str = thought.get("thought", "")
+                tools = thought.get("tools", [])
+                if thought_str:
+                    # Truncate long thoughts
+                    if len(thought_str) > 200:
+                        thought_str = thought_str[:200] + "..."
+                    print(f"LLM: {thought_str}")
+                if tools:
+                    print(f"Tools: {', '.join(tools)}")
             print("-" * 50)
             print(env.render(mark_path=path_taken[:-1]))
             print("-" * 50)

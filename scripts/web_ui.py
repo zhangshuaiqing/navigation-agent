@@ -112,6 +112,18 @@ class AppState:
         self.agent.post_step()
 
         log_msg = f"Step {self.step_count}: {action} | Reward: {reward:+.2f} | {info.get('reason', '')}"
+        
+        # Append LLM thought if available
+        if hasattr(self.agent, 'get_last_thought'):
+            thought = self.agent.get_last_thought()
+            if thought:
+                thought_str = thought.get("thought", "")
+                tools = thought.get("tools", [])
+                if thought_str:
+                    log_msg += f"\n  💭 {thought_str[:200]}"
+                if tools:
+                    log_msg += f"\n  🛠️ {', '.join(tools)}"
+        
         self.logs.append(log_msg)
 
         if done:
@@ -142,6 +154,18 @@ class AppState:
             self.agent.post_step()
 
             log_msg = f"Step {self.step_count}: {action} | Reward: {reward:+.2f}"
+            
+            # Append LLM thought if available
+            if hasattr(self.agent, 'get_last_thought'):
+                thought = self.agent.get_last_thought()
+                if thought:
+                    thought_str = thought.get("thought", "")
+                    tools = thought.get("tools", [])
+                    if thought_str:
+                        log_msg += f"\n  💭 {thought_str[:200]}"
+                    if tools:
+                        log_msg += f"\n  🛠️ {', '.join(tools)}"
+            
             self.logs.append(log_msg)
 
             # Yield intermediate states for streaming updates
